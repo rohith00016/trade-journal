@@ -10,8 +10,7 @@
       "root": "backend/",
       "framework": "express",
       "entrypoint": "src/server.ts",
-      "installCommand": "npm install",
-      "buildCommand": ""
+      "installCommand": "npm install"
     }
   },
   "rewrites": [
