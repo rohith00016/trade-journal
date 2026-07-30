@@ -126,6 +126,8 @@ export interface JournalEntry {
   resultUsd?: number
   resultR?: number
   maximumRr?: number
+  /** Max R before first retest of entry; omit if no meaningful retest */
+  maxBeforeRetest?: number
   commission?: number
   session?: TradeSession
   screenshots: string[]
@@ -209,6 +211,35 @@ export interface ChecklistImpactRow {
   withoutExpectancy: number
   deltaWinRate: number
   deltaExpectancy: number
+  sampleReady: boolean
+  /** keep = required; cut = remove; review = optional; needs_data = keep logging */
+  verdict: 'keep' | 'review' | 'cut' | 'needs_data'
+  verdictHint: string
+}
+
+export interface MaxRrInsights {
+  sample: number
+  avgMaxRr: number | null
+  medianMaxRr: number | null
+  hitRates: Array<{
+    thresholdR: number
+    label: string
+    count: number
+    pct: number
+  }>
+  peakBuckets: Array<{
+    fromR: number
+    toR: number | null
+    label: string
+    count: number
+    pct: number
+  }>
+  mostCommonPeak?: {
+    label: string
+    count: number
+    pct: number
+  }
+  note: string
 }
 
 export interface DashboardAnalytics {
@@ -223,9 +254,27 @@ export interface DashboardAnalytics {
   monthlyPerformance: Array<{ month: string; pnl: number; r: number; trades: number }>
   recentTrades: Trade[]
   checklistImpact: ChecklistImpactRow[]
+  maxRr: MaxRrInsights
 }
 
 export type InsightsSource = 'taken' | 'not_taken' | 'combined'
+
+export interface BestTimeSlot {
+  startMin: number
+  label: string
+  count: number
+  winRate: number | null
+  withMaxSample: number
+  hitRates: Array<{
+    thresholdR: number
+    label: string
+    count: number
+    pct: number | null
+  }>
+  /** Highest of 1 / 1.2 / 1.5 / 2R that still hits ≥60% (fills often) */
+  suggestedTpR: number | null
+  expectancy: number | null
+}
 
 export interface UnifiedInsights {
   source: InsightsSource
@@ -243,13 +292,19 @@ export interface UnifiedInsights {
     takenWithMaxRr: number
     scoredSample: number
   }
-  rrGap: {
-    avgMaxRr: number | null
-    avgRealizedR: number | null
-    avgCapturePct: number | null
-    sample: number
-    note: string
+  bestTimes: {
+    slots15: BestTimeSlot[]
+    slots30: BestTimeSlot[]
+    slots60: BestTimeSlot[]
   }
+  bestSlot: {
+    label: string
+    count: number
+    winRate: number | null
+    suggestedTpR: number | null
+    hitRates: BestTimeSlot['hitRates']
+    expectancy: number | null
+  } | null
   sequence: {
     afterFirstWin: {
       secondTradeCount: number
@@ -261,17 +316,6 @@ export interface UnifiedInsights {
     }
     insight: string
   }
-  hourBuckets: Array<{
-    hour: number
-    label: string
-    count: number
-    takenCount: number
-    notTakenCount: number
-    winRate: number | null
-    avgMaxRr: number | null
-    avgResultR: number | null
-    sampleForWinRate: number
-  }>
   setupIndexBuckets: Array<{
     setupIndex: number
     count: number
@@ -282,6 +326,51 @@ export interface UnifiedInsights {
     avgResultR: number | null
   }>
   checklistImpact: ChecklistImpactRow[]
+}
+
+export interface PlaybookResponse {
+  source: InsightsSource
+  filters: {
+    slotMinutes: 15 | 30 | 60
+    startMin: number | null
+    setupIndex: number | null
+    timeLabel: string
+    setupLabel: string
+  }
+  options: {
+    times: Array<{ startMin: number; label: string; count: number }>
+    setupIndexes: Array<{ setupIndex: number; count: number }>
+  }
+  slice: {
+    count: number
+    winRate: number | null
+    expectancy: number | null
+    withMaxSample: number
+    hitRates: BestTimeSlot['hitRates']
+    suggestedTpR: number | null
+    suggestedBeR: number | null
+    /** Trades with maxBeforeRetest ≥ 0.5R */
+    withRetestSample: number
+    medianMaxBeforeRetest: number | null
+    beSource: 'retest' | 'max_rr_fallback' | null
+    checklistImpact: ChecklistImpactRow[]
+    note: string | null
+  }
+  setupBreakdown: Array<{
+    setupIndex: number
+    count: number
+    winRate: number | null
+    expectancy: number | null
+    suggestedTpR: number | null
+  }>
+  timeBreakdown: Array<{
+    startMin: number
+    label: string
+    count: number
+    winRate: number | null
+    expectancy: number | null
+    suggestedTpR: number | null
+  }>
 }
 
 export interface ApiResponse<T> {

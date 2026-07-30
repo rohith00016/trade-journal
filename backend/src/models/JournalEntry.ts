@@ -28,6 +28,8 @@ export interface IJournalEntry extends Document {
   resultUsd?: number;
   resultR?: number;
   maximumRr?: number;
+  /** Max R reached before price first retested entry. Empty if no meaningful retest. */
+  maxBeforeRetest?: number;
   commission?: number;
   session?: TradeSession;
   screenshots: string[];
@@ -76,6 +78,7 @@ const journalEntrySchema = new Schema<IJournalEntry>(
     resultUsd: Number,
     resultR: Number,
     maximumRr: Number,
+    maxBeforeRetest: Number,
     commission: { type: Number, default: 0 },
     session: {
       type: String,

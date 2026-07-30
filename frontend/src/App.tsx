@@ -10,6 +10,7 @@ import { DashboardPage } from '@/features/dashboard/dashboard-page'
 import { JournalPage } from '@/features/journal/journal-page'
 import { StrategiesPage } from '@/features/strategies/strategies-page'
 import { AnalyticsPage } from '@/features/analytics/analytics-page'
+import { PlaybookPage } from '@/features/playbook/playbook-page'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,6 +35,7 @@ export default function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="journal" element={<JournalPage />} />
                 <Route path="strategies" element={<StrategiesPage />} />
+                <Route path="playbook" element={<PlaybookPage />} />
                 <Route path="analytics" element={<AnalyticsPage />} />
                 <Route
                   path="day-review"

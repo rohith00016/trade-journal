@@ -79,6 +79,7 @@ function buildTradeFormSchema(_source: JournalSource) {
     resultUsd: z.string().optional(),
     resultR: z.string().min(1, 'Result (R) is required — use 0 for BE'),
     maximumRr: z.string().optional(),
+    maxBeforeRetest: z.string().optional(),
     commission: z.string().optional(),
     session: z.enum(['asia', 'london', 'newyork', 'overlap', 'other']),
     notes: z.string().optional(),
@@ -101,6 +102,7 @@ const emptyDefaults: TradeFormValues = {
   resultUsd: '',
   resultR: '',
   maximumRr: '',
+  maxBeforeRetest: '',
   symbol: '',
   notes: '',
 }
@@ -146,6 +148,9 @@ function valuesFromTrade(trade: Trade | JournalEntry): TradeFormValues {
     resultUsd: String(trade.resultUsd ?? ''),
     resultR: String(trade.resultR ?? ''),
     maximumRr: numOrEmpty(trade.maximumRr),
+    maxBeforeRetest: numOrEmpty(
+      'maxBeforeRetest' in trade ? trade.maxBeforeRetest : undefined
+    ),
     commission: trade.commission ? String(trade.commission) : '',
     session: trade.session || 'london',
     notes: trade.notes ?? '',
@@ -285,6 +290,7 @@ export function TradeFormDrawer({
     try {
       const resultR = parseRequiredNumber(values.resultR, 'Result (R)')
       const maximumRr = parseOptionalNumber(values.maximumRr)
+      const maxBeforeRetest = parseOptionalNumber(values.maxBeforeRetest)
 
       const body: Record<string, unknown> = {
         source,
@@ -298,6 +304,7 @@ export function TradeFormDrawer({
         takeProfit: parseOptionalNumber(values.takeProfit),
         resultR,
         maximumRr: maximumRr ?? undefined,
+        maxBeforeRetest: maxBeforeRetest ?? undefined,
         date: new Date(values.date).toISOString(),
         strategyId: selectedStrategyId || undefined,
         checklist,
@@ -447,11 +454,25 @@ export function TradeFormDrawer({
                   <Input
                     type="number"
                     step="any"
-                    placeholder="e.g. 2.5"
+                    placeholder="e.g. 1.9"
                     {...form.register('maximumRr')}
                   />
                 </Field>
               </div>
+              <div className="mt-3">
+                <Field label="Max before retest">
+                  <Input
+                    type="number"
+                    step="any"
+                    placeholder="e.g. 1.2 — blank if no retest"
+                    {...form.register('maxBeforeRetest')}
+                  />
+                </Field>
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Max RR = peak excursion. Max before retest = peak before price first returned to
+                entry — leave blank for noise scratches under ~0.5R. Used for BE suggestions.
+              </p>
             </div>
 
             <Separator />

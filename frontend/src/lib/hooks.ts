@@ -6,6 +6,7 @@ import type {
   InsightsSource,
   JournalEntry,
   JournalListResponse,
+  PlaybookResponse,
   Strategy,
   Trade,
   UnifiedInsights,
@@ -215,5 +216,45 @@ export function useInsights(source: InsightsSource = 'combined') {
     queryKey: ['insights', source],
     queryFn: () =>
       api<UnifiedInsights>(`/analytics/insights?source=${source}`),
+  })
+}
+
+export type PlaybookParams = {
+  source: InsightsSource
+  slotMinutes: 15 | 30 | 60
+  startMin: number | null
+  setupIndex: number | null
+}
+
+export function usePlaybook(params: PlaybookParams) {
+  const q = new URLSearchParams({
+    source: params.source,
+    slotMinutes: String(params.slotMinutes),
+  })
+  if (params.startMin != null) q.set('startMin', String(params.startMin))
+  if (params.setupIndex != null) q.set('setupIndex', String(params.setupIndex))
+
+  return useQuery({
+    queryKey: ['playbook', params],
+    queryFn: () => api<PlaybookResponse>(`/analytics/playbook?${q}`),
+  })
+}
+
+export type AiInsightsResponse = {
+  markdown: string
+  model: string
+  usedGemini: boolean
+  sample: number
+  recommendedTpR?: number | null
+  recommendedBeR?: number | null
+}
+
+export function useAiInsights() {
+  return useMutation({
+    mutationFn: (source: InsightsSource) =>
+      api<AiInsightsResponse>('/analytics/ai-insights', {
+        method: 'POST',
+        body: JSON.stringify({ source }),
+      }),
   })
 }

@@ -142,6 +142,24 @@ export function DashboardPage() {
               : 'Need 3+ trades per hour'
           }
         />
+        <MetricCard
+          label="Avg Max RR"
+          value={data.maxRr.avgMaxRr != null ? `${data.maxRr.avgMaxRr}R` : '—'}
+          hint={
+            data.maxRr.sample
+              ? `${data.maxRr.sample} trades with Max RR`
+              : 'Log Max RR on trades'
+          }
+        />
+        <MetricCard
+          label="Most common peak"
+          value={data.maxRr.mostCommonPeak?.label ?? '—'}
+          hint={
+            data.maxRr.mostCommonPeak
+              ? `${data.maxRr.mostCommonPeak.count} trades · ${data.maxRr.mostCommonPeak.pct}%`
+              : 'Needs Max RR data'
+          }
+        />
       </motion.div>
 
       <div className="grid gap-6 xl:grid-cols-3">

@@ -1,6 +1,13 @@
 import { JournalEntry } from '../models';
+import { IJournalEntry } from '../models/JournalEntry';
 import { ITrade } from '../models/Trade';
 import { migrateLegacyJournal } from './journal.service';
+
+/** Thresholds for “how often did Max RR reach at least X?” */
+const MAX_RR_HIT_THRESHOLDS = [0.5, 1, 1.5, 2, 2.5, 3];
+
+/** Exclusive upper edges for peak distribution (last bucket is open-ended). */
+const MAX_RR_PEAK_EDGES = [0.5, 1, 1.5, 2, 2.5, 3];
 
 export interface PerformanceSummary {
   totalTrades: number;
@@ -39,10 +46,27 @@ function hourInIst(date: Date) {
   return Number(hour ?? 0);
 }
 
-function hourLabelIst(hour: number) {
-  const start = String(hour).padStart(2, '0');
-  const end = String((hour + 1) % 24).padStart(2, '0');
-  return `${start}:00–${end}:00 IST`;
+/** Minutes since midnight in Asia/Kolkata. */
+function minuteOfDayIst(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  return hour * 60 + minute;
+}
+
+function slotStartMinutes(minuteOfDay: number, slotMinutes: number) {
+  return Math.floor(minuteOfDay / slotMinutes) * slotMinutes;
+}
+
+function slotClockLabel(startMin: number) {
+  const h = Math.floor(startMin / 60) % 24;
+  const m = startMin % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 function calcProfitFactor(trades: ITrade[]) {
@@ -92,6 +116,138 @@ function expectancy(trades: ITrade[]) {
   if (!trades.length) return 0;
   const totalR = trades.reduce((s, t) => s + t.resultR, 0);
   return Number((totalR / trades.length).toFixed(3));
+}
+
+function avgOrNull(nums: number[]) {
+  if (!nums.length) return null;
+  return Number((nums.reduce((s, n) => s + n, 0) / nums.length).toFixed(3));
+}
+
+type TradeLike = {
+  resultR?: number;
+  maximumRr?: number;
+};
+
+export interface MaxRrInsights {
+  sample: number;
+  avgMaxRr: number | null;
+  medianMaxRr: number | null;
+  /** % of trades whose Max RR reached at least this level */
+  hitRates: Array<{
+    thresholdR: number;
+    label: string;
+    count: number;
+    pct: number;
+  }>;
+  /** Where Max RR peaked (each trade counted once) */
+  peakBuckets: Array<{
+    fromR: number;
+    toR: number | null;
+    label: string;
+    count: number;
+    pct: number;
+  }>;
+  mostCommonPeak?: {
+    label: string;
+    count: number;
+    pct: number;
+  };
+  note: string;
+}
+
+function medianOrNull(nums: number[]) {
+  if (!nums.length) return null;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return Number(((sorted[mid - 1]! + sorted[mid]!) / 2).toFixed(3));
+  }
+  return Number(sorted[mid]!.toFixed(3));
+}
+
+function peakBucketLabel(fromR: number, toR: number | null) {
+  if (toR == null) return `≥ ${fromR}R`;
+  if (fromR === 0) return `< ${toR}R`;
+  return `${fromR}–${toR}R`;
+}
+
+/** Max RR distribution — choose BE levels from where price typically ran. */
+export function computeMaxRrInsights(trades: TradeLike[]): MaxRrInsights {
+  const maxes = trades
+    .map((t) => t.maximumRr)
+    .filter((n): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0);
+
+  const sample = maxes.length;
+  const pctOf = (count: number) =>
+    sample === 0 ? 0 : Number(((count / sample) * 100).toFixed(1));
+
+  const hitRates = MAX_RR_HIT_THRESHOLDS.map((thresholdR) => {
+    const count = maxes.filter((m) => m >= thresholdR).length;
+    return {
+      thresholdR,
+      label: `≥ ${thresholdR}R`,
+      count,
+      pct: pctOf(count),
+    };
+  });
+
+  const edges = MAX_RR_PEAK_EDGES;
+  const peakBuckets: MaxRrInsights['peakBuckets'] = [];
+  // < first edge
+  {
+    const fromR = 0;
+    const toR = edges[0]!;
+    const count = maxes.filter((m) => m < toR).length;
+    peakBuckets.push({
+      fromR,
+      toR,
+      label: peakBucketLabel(fromR, toR),
+      count,
+      pct: pctOf(count),
+    });
+  }
+  for (let i = 0; i < edges.length - 1; i++) {
+    const fromR = edges[i]!;
+    const toR = edges[i + 1]!;
+    const count = maxes.filter((m) => m >= fromR && m < toR).length;
+    peakBuckets.push({
+      fromR,
+      toR,
+      label: peakBucketLabel(fromR, toR),
+      count,
+      pct: pctOf(count),
+    });
+  }
+  // ≥ last edge
+  {
+    const fromR = edges[edges.length - 1]!;
+    const count = maxes.filter((m) => m >= fromR).length;
+    peakBuckets.push({
+      fromR,
+      toR: null,
+      label: peakBucketLabel(fromR, null),
+      count,
+      pct: pctOf(count),
+    });
+  }
+
+  let mostCommonPeak: MaxRrInsights['mostCommonPeak'];
+  for (const b of peakBuckets) {
+    if (b.count === 0) continue;
+    if (!mostCommonPeak || b.count > mostCommonPeak.count) {
+      mostCommonPeak = { label: b.label, count: b.count, pct: b.pct };
+    }
+  }
+
+  return {
+    sample,
+    avgMaxRr: avgOrNull(maxes),
+    medianMaxRr: medianOrNull(maxes),
+    hitRates,
+    peakBuckets,
+    mostCommonPeak,
+    note: 'Hit rates = % of trades that reached at least that Max RR. Peak buckets = where Max RR landed. Use this to pick a BE level (e.g. if few trades ever hit 2R, BE at 2R is rare).',
+  };
 }
 
 export function computePerformance(trades: ITrade[]): PerformanceSummary {
@@ -234,6 +390,8 @@ export function computeChecklistImpact(trades: ITrade[]) {
     }
   }
 
+  const verdictRank = { cut: 0, review: 1, keep: 2, needs_data: 3 } as const;
+
   return [...itemStats.entries()]
     .map(([key, value]) => {
       const [categoryName] = key.split('::');
@@ -249,23 +407,53 @@ export function computeChecklistImpact(trades: ITrade[]) {
               value.withoutChecked.length) *
             100;
 
+      const withExpectancy = expectancy(value.withChecked);
+      const withoutExpectancy = expectancy(value.withoutChecked);
+      const deltaExpectancy = Number((withExpectancy - withoutExpectancy).toFixed(3));
+      const withCount = value.withChecked.length;
+      const withoutCount = value.withoutChecked.length;
+      const sampleReady = withCount >= 3 && withoutCount >= 3;
+
+      let verdict: 'keep' | 'review' | 'cut' | 'needs_data';
+      let verdictHint: string;
+
+      if (!sampleReady) {
+        verdict = 'needs_data';
+        verdictHint = `Need ≥3 with and ≥3 without (now ${withCount}/${withoutCount}). Keep logging both ways.`;
+      } else if (deltaExpectancy >= 0.15) {
+        verdict = 'keep';
+        verdictHint = 'Checked trades earn clearly more R — keep as a required rule.';
+      } else if (deltaExpectancy <= 0) {
+        verdict = 'cut';
+        verdictHint =
+          'Without this box, expectancy is the same or better — safe to remove so you don’t miss trades.';
+      } else {
+        verdict = 'review';
+        verdictHint =
+          'Only a small edge when checked — consider making it optional or redefine the rule.';
+      }
+
       return {
         categoryName,
         itemLabel: value.itemLabel,
-        withCount: value.withChecked.length,
-        withoutCount: value.withoutChecked.length,
+        withCount,
+        withoutCount,
         withWinRate: Number(withWinRate.toFixed(1)),
         withoutWinRate: Number(withoutWinRate.toFixed(1)),
-        withExpectancy: expectancy(value.withChecked),
-        withoutExpectancy: expectancy(value.withoutChecked),
+        withExpectancy,
+        withoutExpectancy,
         deltaWinRate: Number((withWinRate - withoutWinRate).toFixed(1)),
-        deltaExpectancy: Number(
-          (expectancy(value.withChecked) - expectancy(value.withoutChecked)).toFixed(3)
-        ),
+        deltaExpectancy,
+        sampleReady,
+        verdict,
+        verdictHint,
       };
     })
-    .filter((r) => r.withCount >= 3 && r.withoutCount >= 3)
-    .sort((a, b) => b.deltaExpectancy - a.deltaExpectancy);
+    .sort((a, b) => {
+      const vr = verdictRank[a.verdict] - verdictRank[b.verdict];
+      if (vr !== 0) return vr;
+      return a.deltaExpectancy - b.deltaExpectancy;
+    });
 }
 
 export async function getDashboardAnalytics(
@@ -289,6 +477,12 @@ export async function getDashboardAnalytics(
   const performance = computePerformance(trades);
   const equityCurve = computeEquityCurve(trades);
   const calendarHeatmap = computeCalendarHeatmap(trades);
+  const maxRr = computeMaxRrInsights(
+    entries.map((e) => ({
+      resultR: e.resultR,
+      maximumRr: e.maximumRr,
+    }))
+  );
   const recentTrades = trades.slice(0, 10);
   const monthlyPerformance = (() => {
     const map = new Map<string, { month: string; pnl: number; r: number; trades: number }>();
@@ -316,6 +510,7 @@ export async function getDashboardAnalytics(
     monthlyPerformance,
     recentTrades,
     checklistImpact: computeChecklistImpact(trades),
+    maxRr,
   };
 }
 
@@ -326,12 +521,182 @@ type UnifiedEvent = {
   at: Date;
   dayKey: string;
   hour: number;
+  minuteOfDay: number;
   setupIndex: number;
   strategyName: string;
   maximumRr?: number;
+  /** Max R before first retest of entry */
+  maxBeforeRetest?: number;
   resultR?: number;
   outcome?: 'win' | 'loss' | 'be' | 'unknown';
+  checklist: ITrade['checklist'];
 };
+
+export type TimeSlotMinutes = 15 | 30 | 60;
+
+/** Candidate TPs — % of trades whose Max RR reached at least this. */
+const TP_HIT_THRESHOLDS = [1, 1.2, 1.5, 2];
+/** Suggested TP = highest threshold that still hits this often. */
+const SUGGESTED_TP_MIN_HIT_PCT = 60;
+/** Ignore noise scratches — only count retest peaks at/above this. */
+const BE_RETEST_MIN_R = 0.5;
+const BE_CANDIDATE_LEVELS = [0.5, 1, 1.2, 1.5, 2];
+
+export interface BestTimeSlot {
+  /** Minutes from midnight IST */
+  startMin: number;
+  /** Clock label e.g. "07:30" */
+  label: string;
+  count: number;
+  winRate: number | null;
+  /** Trades in this slot that have Max RR logged */
+  withMaxSample: number;
+  /** % of trades (with Max RR) that reached ≥ each TP level */
+  hitRates: Array<{
+    thresholdR: number;
+    label: string;
+    count: number;
+    pct: number | null;
+  }>;
+  /**
+   * Highest TP among candidates that still hits ≥60% of the time.
+   * Use this when you want a target that fills often.
+   */
+  suggestedTpR: number | null;
+  /** Avg Result R (expectancy) for taken trades in this slot */
+  expectancy: number | null;
+}
+
+function hitRatesForMaxes(maxes: number[]) {
+  const sample = maxes.length;
+  return TP_HIT_THRESHOLDS.map((thresholdR) => {
+    const count = maxes.filter((m) => m >= thresholdR).length;
+    return {
+      thresholdR,
+      label: `≥${thresholdR}R`,
+      count,
+      pct: sample === 0 ? null : Number(((count / sample) * 100).toFixed(1)),
+    };
+  });
+}
+
+function suggestedTpFromHits(
+  hitRates: Array<{ thresholdR: number; pct: number | null }>
+): number | null {
+  let suggested: number | null = null;
+  for (const h of hitRates) {
+    if (h.pct != null && h.pct >= SUGGESTED_TP_MIN_HIT_PCT) {
+      suggested = h.thresholdR;
+    }
+  }
+  return suggested;
+}
+
+/** BE trigger: highest level with ≥70% hits that stays below TP. */
+function suggestedBeFromHits(
+  hitRates: Array<{ thresholdR: number; pct: number | null }>,
+  tpR: number | null
+): number | null {
+  let be: number | null = null;
+  for (const h of hitRates) {
+    if (h.pct == null || h.pct < 70) continue;
+    if (tpR != null && h.thresholdR >= tpR) continue;
+    be = h.thresholdR;
+  }
+  if (be == null && tpR != null) {
+    const below = hitRates
+      .map((h) => h.thresholdR)
+      .filter((r) => r < tpR)
+      .sort((a, b) => b - a);
+    be = below[0] ?? null;
+  }
+  return be;
+}
+
+/**
+ * BE from max-before-retest: highest candidate ≤ median peak (and below TP).
+ * Only peaks ≥ BE_RETEST_MIN_R count (noise scratches ignored).
+ */
+function meaningfulRetestPeaks(list: UnifiedEvent[]) {
+  return list
+    .map((e) => e.maxBeforeRetest)
+    .filter(
+      (n): n is number =>
+        typeof n === 'number' && Number.isFinite(n) && n >= BE_RETEST_MIN_R
+    );
+}
+
+function suggestedBeFromRetests(
+  peaks: number[],
+  tpR: number | null
+): number | null {
+  if (!peaks.length) return null;
+  const med = medianOrNull(peaks);
+  if (med == null) return null;
+
+  let be: number | null = null;
+  for (const r of BE_CANDIDATE_LEVELS) {
+    if (r > med) break;
+    if (tpR != null && r >= tpR) break;
+    be = r;
+  }
+  return be;
+}
+
+function beMetricsFromEvents(list: UnifiedEvent[], suggestedTpR: number | null) {
+  const peaks = meaningfulRetestPeaks(list);
+  const fromRetest = suggestedBeFromRetests(peaks, suggestedTpR);
+  return {
+    withRetestSample: peaks.length,
+    medianMaxBeforeRetest: medianOrNull(peaks),
+    suggestedBeR: fromRetest,
+    beSource: (fromRetest != null
+      ? 'retest'
+      : null) as 'retest' | 'max_rr_fallback' | null,
+  };
+}
+
+function computeBestTimeSlots(
+  events: UnifiedEvent[],
+  slotMinutes: TimeSlotMinutes
+): BestTimeSlot[] {
+  const bySlot = new Map<number, UnifiedEvent[]>();
+  for (const e of events) {
+    const key = slotStartMinutes(e.minuteOfDay, slotMinutes);
+    if (!bySlot.has(key)) bySlot.set(key, []);
+    bySlot.get(key)!.push(e);
+  }
+
+  return [...bySlot.entries()]
+    .map(([startMin, list]) => {
+      const maxes = list
+        .map((e) => e.maximumRr)
+        .filter((n): n is number => typeof n === 'number');
+      const resultRs = list
+        .filter((e) => e.source === 'taken' || typeof e.resultR === 'number')
+        .map((e) => e.resultR)
+        .filter((n): n is number => typeof n === 'number');
+      const takenRs = list
+        .filter((e) => e.source === 'taken')
+        .map((e) => e.resultR)
+        .filter((n): n is number => typeof n === 'number');
+      const forExp = takenRs.length ? takenRs : resultRs;
+      const hitRates = hitRatesForMaxes(maxes);
+
+      return {
+        startMin,
+        label: slotClockLabel(startMin),
+        count: list.length,
+        winRate: winRateFromOutcomes(list),
+        withMaxSample: maxes.length,
+        hitRates,
+        suggestedTpR: suggestedTpFromHits(hitRates),
+        expectancy: avg(forExp),
+      };
+    })
+    .filter((s) => s.count >= 1)
+    .sort((a, b) => a.startMin - b.startMin);
+}
 
 function dayKeyFromDate(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -369,10 +734,7 @@ function assignSetupIndexes(events: UnifiedEvent[]) {
   }
 }
 
-export async function getUnifiedInsights(
-  userId: string,
-  source: AnalyticsSource = 'combined'
-) {
+async function loadUnifiedEvents(userId: string, source: AnalyticsSource) {
   await migrateLegacyJournal(userId);
 
   const entries = await JournalEntry.find({ userId }).sort({ date: 1 });
@@ -384,25 +746,32 @@ export async function getUnifiedInsights(
     at: new Date(t.date),
     dayKey: dayKeyFromDate(new Date(t.date)),
     hour: hourInIst(new Date(t.date)),
+    minuteOfDay: minuteOfDayIst(new Date(t.date)),
     setupIndex: 0,
     strategyName: t.strategyName || 'Unassigned',
     maximumRr: t.maximumRr,
+    maxBeforeRetest: t.maxBeforeRetest,
     resultR: t.resultR,
     outcome: outcomeFromR(t.resultR ?? 0),
+    checklist: t.checklist ?? [],
   }));
 
   const notTakenEvents: UnifiedEvent[] = notTaken.map((e) => ({
     source: 'not_taken' as const,
     at: new Date(e.date),
     dayKey: dayKeyFromDate(new Date(e.date)),
-    hour: hourInIst(new Date(e.date)),    setupIndex: 0,
+    hour: hourInIst(new Date(e.date)),
+    minuteOfDay: minuteOfDayIst(new Date(e.date)),
+    setupIndex: 0,
     strategyName: e.strategyName || 'Unassigned',
     maximumRr: e.maximumRr,
+    maxBeforeRetest: e.maxBeforeRetest,
     resultR: e.resultR,
     outcome:
       typeof e.resultR === 'number'
         ? outcomeFromR(e.resultR)
         : e.outcome ?? 'unknown',
+    checklist: e.checklist ?? [],
   }));
 
   let events: UnifiedEvent[] = [];
@@ -411,6 +780,189 @@ export async function getUnifiedInsights(
   else events = [...takenEvents, ...notTakenEvents];
 
   assignSetupIndexes(events);
+  assignSetupIndexes(takenEvents);
+
+  return { events, takenEvents, notTakenEvents, taken, notTaken };
+}
+
+function metricsForEvents(list: UnifiedEvent[]) {
+  const maxes = list
+    .map((e) => e.maximumRr)
+    .filter((n): n is number => typeof n === 'number');
+  const takenRs = list
+    .filter((e) => e.source === 'taken')
+    .map((e) => e.resultR)
+    .filter((n): n is number => typeof n === 'number');
+  const hitRates = hitRatesForMaxes(maxes);
+  const suggestedTpR = suggestedTpFromHits(hitRates);
+  const retestBe = beMetricsFromEvents(list, suggestedTpR);
+  const fallbackBe = suggestedBeFromHits(hitRates, suggestedTpR);
+  const suggestedBeR = retestBe.suggestedBeR ?? fallbackBe;
+  const beSource: 'retest' | 'max_rr_fallback' | null =
+    retestBe.suggestedBeR != null
+      ? 'retest'
+      : fallbackBe != null
+        ? 'max_rr_fallback'
+        : null;
+
+  const asTrades = list
+    .filter((e) => e.source === 'taken' && e.checklist?.length)
+    .map(
+      (e) =>
+        ({
+          resultR: e.resultR ?? 0,
+          checklist: e.checklist,
+        }) as ITrade
+    );
+
+  return {
+    count: list.length,
+    winRate: winRateFromOutcomes(list),
+    expectancy: avg(takenRs.length ? takenRs : list.map((e) => e.resultR).filter((n): n is number => typeof n === 'number')),
+    withMaxSample: maxes.length,
+    hitRates,
+    suggestedTpR,
+    suggestedBeR,
+    withRetestSample: retestBe.withRetestSample,
+    medianMaxBeforeRetest: retestBe.medianMaxBeforeRetest,
+    beSource,
+    checklistImpact: computeChecklistImpact(asTrades),
+  };
+}
+
+export async function getPlaybook(
+  userId: string,
+  opts: {
+    source?: AnalyticsSource;
+    slotMinutes?: TimeSlotMinutes;
+    /** null / omit = all times */
+    startMin?: number | null;
+    /** null / omit = all setup # */
+    setupIndex?: number | null;
+  } = {}
+) {
+  const source = opts.source ?? 'combined';
+  const slotMinutes = (opts.slotMinutes ?? 30) as TimeSlotMinutes;
+  const startMinFilter =
+    opts.startMin === undefined || opts.startMin === null
+      ? null
+      : Number(opts.startMin);
+  const setupFilter =
+    opts.setupIndex === undefined || opts.setupIndex === null
+      ? null
+      : Number(opts.setupIndex);
+
+  const { events } = await loadUnifiedEvents(userId, source);
+
+  const timeOptions = computeBestTimeSlots(events, slotMinutes).map((s) => ({
+    startMin: s.startMin,
+    label: s.label,
+    count: s.count,
+  }));
+
+  const bySetup = new Map<number, number>();
+  for (const e of events) {
+    bySetup.set(e.setupIndex, (bySetup.get(e.setupIndex) ?? 0) + 1);
+  }
+  const setupOptions = [...bySetup.entries()]
+    .map(([setupIndex, count]) => ({ setupIndex, count }))
+    .sort((a, b) => a.setupIndex - b.setupIndex);
+
+  let slice = events;
+  if (startMinFilter != null && Number.isFinite(startMinFilter)) {
+    slice = slice.filter(
+      (e) => slotStartMinutes(e.minuteOfDay, slotMinutes) === startMinFilter
+    );
+  }
+  if (setupFilter != null && Number.isFinite(setupFilter)) {
+    slice = slice.filter((e) => e.setupIndex === setupFilter);
+  }
+
+  const metrics = metricsForEvents(slice);
+
+  // Cross-breakdown helpers inside current filters
+  let setupBreakdown: Array<{
+    setupIndex: number;
+    count: number;
+    winRate: number | null;
+    expectancy: number | null;
+    suggestedTpR: number | null;
+  }> = [];
+  let timeBreakdown: Array<{
+    startMin: number;
+    label: string;
+    count: number;
+    winRate: number | null;
+    expectancy: number | null;
+    suggestedTpR: number | null;
+  }> = [];
+
+  if (setupFilter == null) {
+    const map = new Map<number, UnifiedEvent[]>();
+    for (const e of slice) {
+      if (!map.has(e.setupIndex)) map.set(e.setupIndex, []);
+      map.get(e.setupIndex)!.push(e);
+    }
+    setupBreakdown = [...map.entries()]
+      .map(([setupIndex, list]) => {
+        const m = metricsForEvents(list);
+        return {
+          setupIndex,
+          count: m.count,
+          winRate: m.winRate,
+          expectancy: m.expectancy,
+          suggestedTpR: m.suggestedTpR,
+        };
+      })
+      .sort((a, b) => a.setupIndex - b.setupIndex);
+  }
+
+  if (startMinFilter == null) {
+    timeBreakdown = computeBestTimeSlots(slice, slotMinutes).map((s) => ({
+      startMin: s.startMin,
+      label: s.label,
+      count: s.count,
+      winRate: s.winRate,
+      expectancy: s.expectancy,
+      suggestedTpR: s.suggestedTpR,
+    }));
+  }
+
+  return {
+    source,
+    filters: {
+      slotMinutes,
+      startMin: startMinFilter,
+      setupIndex: setupFilter,
+      timeLabel:
+        startMinFilter == null ? 'All times' : slotClockLabel(startMinFilter),
+      setupLabel:
+        setupFilter == null ? 'All setups' : `#${setupFilter} of day`,
+    },
+    options: {
+      times: timeOptions,
+      setupIndexes: setupOptions,
+    },
+    slice: {
+      ...metrics,
+      note:
+        metrics.count < 5
+          ? 'Small sample — treat TP/BE and rule cuts as tentative.'
+          : null,
+    },
+    setupBreakdown,
+    timeBreakdown,
+  };
+}
+
+export async function getUnifiedInsights(
+  userId: string,
+  source: AnalyticsSource = 'combined'
+) {
+  const { events, takenEvents, notTakenEvents, taken } = await loadUnifiedEvents(
+    userId,
+    source
+  );
 
   const withMax = events.filter((e) => typeof e.maximumRr === 'number');
   const takenWithBoth = events.filter(
@@ -448,38 +1000,6 @@ export async function getUnifiedInsights(
     }
   }
 
-  const byHour = new Map<number, UnifiedEvent[]>();
-  for (const e of events) {
-    if (!byHour.has(e.hour)) byHour.set(e.hour, []);
-    byHour.get(e.hour)!.push(e);
-  }
-  const hourBuckets = [...byHour.entries()]
-    .map(([hour, list]) => {
-      const scored = list.filter((e) => e.outcome === 'win' || e.outcome === 'loss');
-      return {
-        hour,
-        label: hourLabelIst(hour),
-        count: list.length,
-        takenCount: list.filter((e) => e.source === 'taken').length,
-        notTakenCount: list.filter((e) => e.source === 'not_taken').length,
-        winRate: winRateFromOutcomes(list),
-        avgMaxRr: avg(
-          list
-            .map((e) => e.maximumRr)
-            .filter((n): n is number => typeof n === 'number')
-        ),
-        avgResultR: avg(
-          list
-            .filter((e) => e.source === 'taken')
-            .map((e) => e.resultR)
-            .filter((n): n is number => typeof n === 'number')
-        ),
-        sampleForWinRate: scored.length,
-      };
-    })
-    .filter((b) => b.count >= 1)
-    .sort((a, b) => a.hour - b.hour);
-
   const byIndex = new Map<number, UnifiedEvent[]>();
   for (const e of events) {
     if (!byIndex.has(e.setupIndex)) byIndex.set(e.setupIndex, []);
@@ -510,6 +1030,29 @@ export async function getUnifiedInsights(
     (e) => e.source === 'taken' && (e.outcome === 'win' || e.outcome === 'loss')
   );
 
+  const bestTimes = {
+    slots15: computeBestTimeSlots(events, 15),
+    slots30: computeBestTimeSlots(events, 30),
+    slots60: computeBestTimeSlots(events, 60),
+  };
+
+  // Best clock time by expectancy among slots with enough sample (30m grid)
+  const ranked30 = [...bestTimes.slots30]
+    .filter((s) => s.count >= 3 && s.expectancy != null)
+    .sort((a, b) => (b.expectancy ?? -Infinity) - (a.expectancy ?? -Infinity));
+  const bestSlot = ranked30[0]
+    ? {
+        label: ranked30[0].label,
+        count: ranked30[0].count,
+        winRate: ranked30[0].winRate,
+        suggestedTpR: ranked30[0].suggestedTpR,
+        hitRates: ranked30[0].hitRates,
+        expectancy: ranked30[0].expectancy,
+      }
+    : null;
+
+  const overallMetrics = metricsForEvents(events);
+
   return {
     source,
     counts: {
@@ -531,14 +1074,20 @@ export async function getUnifiedInsights(
       takenWithMaxRr: takenWithBoth.length,
       scoredSample: takenScored.length,
     },
-    rrGap: {
-      avgMaxRr: avg(withMax.map((e) => e.maximumRr as number)),
-      avgRealizedR: avg(takenWithBoth.map((e) => e.resultR as number)),
-      avgCapturePct: avg(captureRates),
-      sample: takenWithBoth.length,
+    recommendedTpR: overallMetrics.suggestedTpR,
+    recommendedBeR: overallMetrics.suggestedBeR,
+    beSource: overallMetrics.beSource,
+    retestBe: {
+      sample: overallMetrics.withRetestSample,
+      medianMaxBeforeRetest: overallMetrics.medianMaxBeforeRetest,
+      suggestedBeR:
+        overallMetrics.beSource === 'retest' ? overallMetrics.suggestedBeR : null,
+      minPeakR: BE_RETEST_MIN_R,
       note:
-        'When Max RR is higher than realized R on taken trades, you’re leaving potential R on the table (or Max RR is optimistic).',
+        'maxBeforeRetest = max R before first return to entry. Only peaks ≥0.5R count; leave blank for noise scratches.',
     },
+    bestTimes,
+    bestSlot,
     sequence: {
       afterFirstWin: {
         secondTradeCount: afterWinSecondN,
@@ -555,9 +1104,8 @@ export async function getUnifiedInsights(
             : Number(((afterLossSecondWins / afterLossSecondN) * 100).toFixed(1)),
       },
       insight:
-        'If win rate of the 2nd taken trade after a first win is weak, consider a “stop after first win” rule.',
+        'If the 2nd trade after a first win is weak, consider stopping after the first win.',
     },
-    hourBuckets,
     setupIndexBuckets,
     checklistImpact:
       source === 'not_taken'

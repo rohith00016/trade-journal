@@ -6,6 +6,7 @@ import {
   BookOpen,
   ChartColumn,
   LayoutDashboard,
+  Map,
   Target,
 } from 'lucide-react'
 
@@ -13,6 +14,7 @@ const links = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/journal', label: 'Journal', icon: BookOpen },
   { to: '/strategies', label: 'Strategies', icon: Target },
+  { to: '/playbook', label: 'Playbook', icon: Map },
   { to: '/journal?new=1', label: 'Log taken trade', icon: BookOpen },
   { to: '/journal?new=not-taken', label: 'Log not-taken', icon: BookOpen },
   { to: '/strategies?new=1', label: 'New strategy', icon: Target },

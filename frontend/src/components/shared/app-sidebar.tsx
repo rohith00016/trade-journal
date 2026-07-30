@@ -5,6 +5,7 @@ import {
   ChartColumn,
   LayoutDashboard,
   LogOut,
+  Map,
   Sparkles,
   Target,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/journal', label: 'Journal', icon: BookOpen },
   { to: '/strategies', label: 'Strategies', icon: Target },
+  { to: '/playbook', label: 'Playbook', icon: Map },
   { to: '/analytics', label: 'Analytics', icon: ChartColumn },
 ]
 
