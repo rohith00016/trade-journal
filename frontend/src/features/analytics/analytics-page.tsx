@@ -325,7 +325,7 @@ export function AnalyticsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>2nd trade of the day?</CardTitle>
+          <CardTitle>2nd setup of the day?</CardTitle>
           <CardDescription>{data.sequence.insight}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -492,7 +492,7 @@ function SequenceCard({
       <p className="text-sm font-medium">{title}</p>
       <p className="mt-2 font-mono text-3xl">{fmt(winRate, '%', 0)}</p>
       <p className="mt-1 text-xs text-muted-foreground">
-        2nd trade win rate · {count} day{count === 1 ? '' : 's'} with ≥2 trades
+        2nd setup win rate · {count} day{count === 1 ? '' : 's'} with ≥2 setups
       </p>
     </div>
   )

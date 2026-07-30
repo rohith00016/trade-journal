@@ -1153,16 +1153,17 @@ export async function getUnifiedInsights(
     (e) => ((e.resultR as number) / (e.maximumRr as number)) * 100
   );
 
-  const takenByDay = new Map<string, UnifiedEvent[]>();
-  for (const e of takenEvents) {
-    if (!takenByDay.has(e.dayKey)) takenByDay.set(e.dayKey, []);
-    takenByDay.get(e.dayKey)!.push(e);
+  // Sequence follows the active source filter (combined includes not-taken setups).
+  const eventsByDay = new Map<string, UnifiedEvent[]>();
+  for (const e of events) {
+    if (!eventsByDay.has(e.dayKey)) eventsByDay.set(e.dayKey, []);
+    eventsByDay.get(e.dayKey)!.push(e);
   }
   let afterWinSecondN = 0;
   let afterWinSecondWins = 0;
   let afterLossSecondN = 0;
   let afterLossSecondWins = 0;
-  for (const list of takenByDay.values()) {
+  for (const list of eventsByDay.values()) {
     const sorted = [...list].sort((a, b) => a.at.getTime() - b.at.getTime());
     if (sorted.length < 2) continue;
     const first = sorted[0];
@@ -1286,7 +1287,11 @@ export async function getUnifiedInsights(
             : Number(((afterLossSecondWins / afterLossSecondN) * 100).toFixed(1)),
       },
       insight:
-        'If the 2nd trade after a first win is weak, consider stopping after the first win.',
+        source === 'combined'
+          ? '2nd setup of the day across taken + skipped. If weak after a first win, consider stopping.'
+          : source === 'taken'
+            ? 'If the 2nd taken trade after a first win is weak, consider stopping after the first win.'
+            : '2nd skipped setup of the day after a first win/loss in this filter.',
     },
     setupIndexBuckets,
     checklistImpact:

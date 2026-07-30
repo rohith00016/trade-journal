@@ -18,6 +18,8 @@ Your jobs (in order):
    - Prefer beSource "outcome" over "retest" or "max_rr_fallback".
 2) Audit **every checklist rule** using checklistRuleAudit (verdict keep/review/cut/needs_data). List rules to CUT or demote so the trader does not miss good setups. Do not only discuss one example rule — cover all ready verdicts.
 3) Best IST clock times, avg R, and whether to take a 2nd trade.
+   - sequence uses the current source filter (combined = taken + not_taken setups that day).
+   - If afterFirstWin.secondTradeCount is 0, say insufficient data — do not invent caution from an empty sample.
 
 Hit-rate / retest reading:
 - pct at ≥XR (Max RR) = share of trades whose peak reached at least X — use for TP fill likelihood.
