@@ -12,6 +12,7 @@ No broker connections. No auto-import. No chart replay. Everything is manually e
 journal/
 ├── frontend/          # React + Vite + Tailwind + shadcn/ui
 ├── backend/           # Express + MongoDB + JWT
+├── vercel.json        # Vercel Services (web + API)
 └── README.md
 ```
 
@@ -95,6 +96,28 @@ npm run dev
 ```
 
 API: `http://localhost:5000` · App: `http://localhost:5173`
+
+---
+
+## Deploy on Vercel (Services)
+
+One project serves the Vite app and Express API together. Root `vercel.json` routes `/api` → backend and everything else → frontend.
+
+1. Push this repo and [import the project](https://vercel.com/new) (root directory = repo root).
+2. Set **Environment Variables** on the project:
+
+| Variable | Value |
+|----------|--------|
+| `VITE_API_URL` | `/api` |
+| `MONGODB_URI` | Atlas (or other) connection string |
+| `JWT_SECRET` | long random secret |
+| `CLIENT_URL` | `https://your-deployment.vercel.app` |
+| `NODE_ENV` | `production` |
+| `CLOUDINARY_*` | cloud name, API key, secret |
+
+3. Deploy. Frontend build-time reads `VITE_API_URL`; the API runs as the Express service.
+
+Local `frontend/.env` can stay `VITE_API_URL=http://localhost:5000/api`.
 
 ### Core API surface
 

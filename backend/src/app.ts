@@ -5,21 +5,39 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { env } from './config/env';
+import { connectDatabase } from './config/db';
 import routes from './routes';
 import { errorHandler } from './middleware/errorHandler';
 import { AppError } from './types';
-import dns from 'node:dns'
+import dns from 'node:dns';
 
 dns.setDefaultResultOrder('ipv4first');
 dns.setServers(['8.8.8.8', '8.8.4.4']);
 
+function corsOrigins(): string | string[] {
+  const origins = [env.clientUrl];
+  if (process.env.VERCEL_URL) {
+    origins.push(`https://${process.env.VERCEL_URL}`);
+  }
+  return origins.length === 1 ? origins[0]! : [...new Set(origins)];
+}
+
 export function createApp() {
   const app = express();
+
+  app.use(async (_req, _res, next) => {
+    try {
+      await connectDatabase();
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
 
   app.use(helmet());
   app.use(
     cors({
-      origin: env.clientUrl,
+      origin: corsOrigins(),
       credentials: true,
     })
   );
