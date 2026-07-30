@@ -37,6 +37,7 @@ export function AnalyticsPage() {
   const [aiLevels, setAiLevels] = useState<{
     tp: number | null
     be: number | null
+    beVerdict: 'protect' | 'hold' | null
   } | null>(null)
   const { data, isLoading } = useInsights(source)
   const ai = useAiInsights()
@@ -57,6 +58,7 @@ export function AnalyticsPage() {
       setAiLevels({
         tp: result.recommendedTpR ?? null,
         be: result.recommendedBeR ?? null,
+        beVerdict: result.beVerdict ?? null,
       })
     } catch (err) {
       toast.error(
@@ -136,7 +138,8 @@ export function AnalyticsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {aiLevels && (aiLevels.tp != null || aiLevels.be != null) ? (
+            {aiLevels &&
+            (aiLevels.tp != null || aiLevels.be != null || aiLevels.beVerdict === 'hold') ? (
               <div className="flex flex-wrap gap-3">
                 {aiLevels.tp != null ? (
                   <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2">
@@ -149,14 +152,24 @@ export function AnalyticsPage() {
                     </p>
                   </div>
                 ) : null}
-                {aiLevels.be != null ? (
+                {aiLevels.beVerdict === 'hold' ? (
+                  <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      BE rule
+                    </p>
+                    <p className="font-mono text-xl font-semibold">Hold</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      After retest, winners beat stops saved — hold for TP
+                    </p>
+                  </div>
+                ) : aiLevels.be != null ? (
                   <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2">
                     <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
                       Suggested BE after
                     </p>
                     <p className="font-mono text-xl font-semibold">{aiLevels.be}R</p>
                     <p className="text-[11px] text-muted-foreground">
-                      Move stop to BE once Max hits this
+                      Protect: move stop to BE after this run then retest
                     </p>
                   </div>
                 ) : null}

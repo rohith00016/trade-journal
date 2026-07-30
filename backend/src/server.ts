@@ -1,6 +1,10 @@
+import express from 'express';
 import { createApp } from './app';
 import { connectDatabase } from './config/db';
 import { env } from './config/env';
+
+// Keep a direct express import so Vercel framework detection/tracing resolves the dependency.
+void express;
 
 const app = createApp();
 

@@ -190,21 +190,30 @@ export function PlaybookPage() {
                 <PlaybookStat
                   label="BE after"
                   value={
-                    playbook.slice.suggestedBeR != null
-                      ? `${playbook.slice.suggestedBeR}R`
-                      : '—'
+                    playbook.slice.beVerdict === 'hold'
+                      ? 'Hold'
+                      : playbook.slice.suggestedBeR != null
+                        ? `${playbook.slice.suggestedBeR}R`
+                        : '—'
                   }
                   hint={
-                    playbook.slice.beSource === 'retest'
-                      ? `Retest peak · n=${playbook.slice.withRetestSample}`
-                      : playbook.slice.beSource === 'max_rr_fallback'
-                        ? 'Max RR fallback'
-                        : 'Log max before retest'
+                    playbook.slice.beVerdict === 'hold'
+                      ? 'Winners beat BE saves'
+                      : playbook.slice.beSource === 'outcome' &&
+                          playbook.slice.beDeltaExpectancy != null
+                        ? `Protect · Δ${playbook.slice.beDeltaExpectancy > 0 ? '+' : ''}${playbook.slice.beDeltaExpectancy}R`
+                        : playbook.slice.beSource === 'retest'
+                          ? `Retest peak · n=${playbook.slice.withRetestSample}`
+                          : playbook.slice.beSource === 'max_rr_fallback'
+                            ? 'Max RR fallback'
+                            : 'Log max before retest'
                   }
                 />
               </div>
 
-              {playbook.slice.withRetestSample > 0 ? (
+              {playbook.slice.beHint ? (
+                <p className="text-xs text-muted-foreground">{playbook.slice.beHint}</p>
+              ) : playbook.slice.withRetestSample > 0 ? (
                 <p className="text-xs text-muted-foreground">
                   Median max-before-retest (≥0.5R):{' '}
                   <span className="font-mono text-foreground">
@@ -220,6 +229,78 @@ export function PlaybookPage() {
                   before first return to entry (skip noise under 0.5R).
                 </p>
               )}
+
+              {playbook.slice.beLevels.length > 0 &&
+              playbook.slice.beScoredSample >= 2 ? (
+                <div>
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    BE counterfactual (retest → flatten)
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[28rem] text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-border/60 text-muted-foreground">
+                          <th className="py-1.5 pr-3 font-medium">Level</th>
+                          <th className="py-1.5 pr-3 font-medium">Fired</th>
+                          <th className="py-1.5 pr-3 font-medium">Losses saved</th>
+                          <th className="py-1.5 pr-3 font-medium">Winners cut</th>
+                          <th className="py-1.5 font-medium">Δ R/trade</th>
+                        </tr>
+                      </thead>
+                      <tbody className="font-mono">
+                        {playbook.slice.beLevels.map((row) => {
+                          const selected =
+                            playbook.slice.beVerdict === 'protect' &&
+                            playbook.slice.suggestedBeR === row.levelR
+                          const delta = row.deltaExpectancy
+                          return (
+                            <tr
+                              key={row.levelR}
+                              className={
+                                selected
+                                  ? 'bg-muted/30 text-foreground'
+                                  : 'text-muted-foreground'
+                              }
+                            >
+                              <td className="py-1.5 pr-3">{row.levelR}R</td>
+                              <td className="py-1.5 pr-3">{row.triggered}</td>
+                              <td className="py-1.5 pr-3">
+                                {row.lossesSaved}
+                                <span className="text-[10px] text-muted-foreground">
+                                  {' '}
+                                  ({row.savedR}R)
+                                </span>
+                              </td>
+                              <td className="py-1.5 pr-3">
+                                {row.winnersCut}
+                                <span className="text-[10px] text-muted-foreground">
+                                  {' '}
+                                  ({row.cutR}R)
+                                </span>
+                              </td>
+                              <td
+                                className={
+                                  delta == null
+                                    ? 'py-1.5'
+                                    : delta > 0
+                                      ? 'py-1.5 text-emerald-600 dark:text-emerald-400'
+                                      : delta < 0
+                                        ? 'py-1.5 text-red-600 dark:text-red-400'
+                                        : 'py-1.5'
+                                }
+                              >
+                                {delta == null
+                                  ? '—'
+                                  : `${delta > 0 ? '+' : ''}${delta}`}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
 
               <div>
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">

@@ -352,7 +352,20 @@ export interface PlaybookResponse {
     /** Trades with maxBeforeRetest ≥ 0.5R */
     withRetestSample: number
     medianMaxBeforeRetest: number | null
-    beSource: 'retest' | 'max_rr_fallback' | null
+    beScoredSample: number
+    beLevels: Array<{
+      levelR: number
+      triggered: number
+      lossesSaved: number
+      winnersCut: number
+      savedR: number
+      cutR: number
+      deltaExpectancy: number | null
+    }>
+    beSource: 'outcome' | 'retest' | 'max_rr_fallback' | null
+    beVerdict: 'protect' | 'hold' | null
+    beDeltaExpectancy: number | null
+    beHint: string | null
     checklistImpact: ChecklistImpactRow[]
     note: string | null
   }

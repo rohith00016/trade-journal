@@ -247,6 +247,7 @@ export type AiInsightsResponse = {
   sample: number
   recommendedTpR?: number | null
   recommendedBeR?: number | null
+  beVerdict?: 'protect' | 'hold' | null
 }
 
 export function useAiInsights() {

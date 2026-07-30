@@ -12,14 +12,18 @@ You ONLY use the JSON provided. Do not invent trades or numbers.
 Your jobs (in order):
 1) Recommend concrete **Take Profit (TP)** and **Breakeven (BE)** levels in R.
    - TP from Max RR hit rates (how far price typically ran).
-   - BE from maxBeforeRetest when present (how far price ran before first retest of entry). Prefer retestBe / recommendedBeR when beSource is "retest".
+   - BE from outcome counterfactuals in retestBe when present:
+     • beVerdict "protect" + recommendedBeR = move stop to BE after that run then retest (saved losses beat cut winners; ΔR/trade > 0).
+     • beVerdict "hold" = do NOT move to BE early — winners after retest outweigh stops saved; hold toward TP.
+   - Prefer beSource "outcome" over "retest" or "max_rr_fallback".
 2) Audit **every checklist rule** using checklistRuleAudit (verdict keep/review/cut/needs_data). List rules to CUT or demote so the trader does not miss good setups. Do not only discuss one example rule — cover all ready verdicts.
 3) Best IST clock times, avg R, and whether to take a 2nd trade.
 
 Hit-rate / retest reading:
 - pct at ≥XR (Max RR) = share of trades whose peak reached at least X — use for TP fill likelihood.
-- maxBeforeRetest = max R before price first returned to entry. Peaks below 0.5R are noise and ignored. Use median / suggested BE to move stop to BE after that run.
-- Prefer TP with solid fill (≥50–60% hits). Prefer BE from retest data when sample ≥1; otherwise fall back to Max RR hit rates.
+- maxBeforeRetest = max R before price first returned to entry. Peaks below 0.5R are noise.
+- retestBe.levels: for each BE level, lossesSaved vs winnersCut and deltaExpectancy if flattened at 0R after retest.
+- Prefer TP with solid fill (≥50–60% hits).
 
 Checklist verdicts:
 - keep = required (checked trades clearly better expectancy)
@@ -114,8 +118,21 @@ function buildPayload(insights: Awaited<ReturnType<typeof getUnifiedInsights>>) 
   const overallHits = overallHitRates(slots30);
   const recommendedTpR = insights.recommendedTpR ?? recommendTpAndBe(overallHits).recommendedTpR;
   const recommendedBeR =
-    insights.recommendedBeR ?? recommendTpAndBe(overallHits).recommendedBeR;
-  const beFromRetest = insights.beSource === 'retest';
+    insights.beVerdict === 'hold'
+      ? null
+      : (insights.recommendedBeR ?? recommendTpAndBe(overallHits).recommendedBeR);
+
+  const beMeaning =
+    insights.beVerdict === 'hold'
+      ? insights.beHint ??
+        'Hold for TP — moving to BE after retest would cut more winners than it saves.'
+      : recommendedBeR == null
+        ? null
+        : insights.beSource === 'outcome'
+          ? `Protect: after +${recommendedBeR}R then retest of entry, move stop to BE (Δ ${insights.beDeltaExpectancy ?? '?'}R/trade vs no BE).`
+          : insights.beSource === 'retest'
+            ? `After price reaches +${recommendedBeR}R before retesting entry, consider moving stop to breakeven (peak-based; log more for outcome score).`
+            : `After price reaches +${recommendedBeR}R (Max RR fallback — log maxBeforeRetest for protect vs hold), consider moving stop to breakeven.`;
 
   return {
     source: insights.source,
@@ -124,18 +141,16 @@ function buildPayload(insights: Awaited<ReturnType<typeof getUnifiedInsights>>) 
     howToReadHitRates:
       'pct at ≥XR = share of trades whose Max RR reached at least X. Use for TP fill likelihood.',
     howToReadRetestBe:
-      'maxBeforeRetest = max R before first return to entry. Only ≥0.5R counts. Prefer this for BE; Max RR hit rates are TP / fallback only.',
+      'Counterfactual BE: if maxBeforeRetest ≥ level, flatten at 0R. protect if ΔR/trade > 0; hold if winners after retest dominate.',
     overallMaxRrHitRates: overallHits,
     retestBe: insights.retestBe,
     beSource: insights.beSource,
+    beVerdict: insights.beVerdict,
+    beDeltaExpectancy: insights.beDeltaExpectancy,
+    beHint: insights.beHint,
     recommendedTpR,
     recommendedBeR,
-    recommendedBeMeaning:
-      recommendedBeR == null
-        ? null
-        : beFromRetest
-          ? `After price reaches +${recommendedBeR}R before retesting entry, consider moving stop to breakeven.`
-          : `After price reaches +${recommendedBeR}R (Max RR fallback — log maxBeforeRetest for better BE), consider moving stop to breakeven.`,
+    recommendedBeMeaning: beMeaning,
     recommendedTpMeaning:
       recommendedTpR == null
         ? null
@@ -242,7 +257,7 @@ export async function generateAiInsights(
     };
   }
 
-  const userContent = `Journal analytics JSON (IST). Lead with concrete TP (from Max RR) and BE (prefer maxBeforeRetest / retestBe when beSource is retest):\n\n${JSON.stringify(payload)}`;
+  const userContent = `Journal analytics JSON (IST). Lead with TP (Max RR) and BE (prefer outcome protect vs hold from retestBe):\n\n${JSON.stringify(payload)}`;
   const markdown = await callGemini(userContent);
 
   return {
@@ -252,5 +267,6 @@ export async function generateAiInsights(
     sample: insights.counts.filtered,
     recommendedTpR: payload.recommendedTpR,
     recommendedBeR: payload.recommendedBeR,
+    beVerdict: payload.beVerdict,
   };
 }

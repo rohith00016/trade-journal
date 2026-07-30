@@ -541,6 +541,35 @@ const SUGGESTED_TP_MIN_HIT_PCT = 60;
 /** Ignore noise scratches — only count retest peaks at/above this. */
 const BE_RETEST_MIN_R = 0.5;
 const BE_CANDIDATE_LEVELS = [0.5, 1, 1.2, 1.5, 2];
+/** Need at least this many BE triggers at a level to trust the counterfactual. */
+const BE_OUTCOME_MIN_TRIGGERS = 2;
+
+export type BeSource = 'outcome' | 'retest' | 'max_rr_fallback' | null;
+export type BeVerdict = 'protect' | 'hold' | null;
+
+export type BeLevelScore = {
+  levelR: number;
+  triggered: number;
+  lossesSaved: number;
+  winnersCut: number;
+  savedR: number;
+  cutR: number;
+  /** Counterfactual avg R − actual avg R over scored trades */
+  deltaExpectancy: number | null;
+};
+
+export type BeAnalysis = {
+  withRetestSample: number;
+  medianMaxBeforeRetest: number | null;
+  scoredSample: number;
+  levels: BeLevelScore[];
+  suggestedBeR: number | null;
+  beSource: BeSource;
+  beVerdict: BeVerdict;
+  /** Net ΔR/trade at the chosen protect level (if any) */
+  beDeltaExpectancy: number | null;
+  hint: string | null;
+};
 
 export interface BestTimeSlot {
   /** Minutes from midnight IST */
@@ -643,16 +672,151 @@ function suggestedBeFromRetests(
   return be;
 }
 
-function beMetricsFromEvents(list: UnifiedEvent[], suggestedTpR: number | null) {
+/**
+ * Counterfactual: if stop moved to BE after price reached levelR then retested entry,
+ * losses that triggered become 0R (saved); winners that triggered become 0R (cut).
+ * Trades without a logged maxBeforeRetest are unchanged (rule never assumed to fire).
+ */
+function scoreBeLevel(
+  scored: Array<{ resultR: number; maxBeforeRetest: number }>,
+  levelR: number
+): BeLevelScore {
+  let triggered = 0;
+  let lossesSaved = 0;
+  let winnersCut = 0;
+  let savedR = 0;
+  let cutR = 0;
+  let actualSum = 0;
+  let cfSum = 0;
+
+  for (const t of scored) {
+    actualSum += t.resultR;
+    const fires = t.maxBeforeRetest >= levelR;
+    if (!fires) {
+      cfSum += t.resultR;
+      continue;
+    }
+    triggered += 1;
+    // Flattened at BE on retest
+    cfSum += 0;
+    if (t.resultR < 0) {
+      lossesSaved += 1;
+      savedR += -t.resultR;
+    } else if (t.resultR > 0) {
+      winnersCut += 1;
+      cutR += t.resultR;
+    }
+  }
+
+  const n = scored.length;
+  const deltaExpectancy =
+    n === 0 ? null : Number(((cfSum - actualSum) / n).toFixed(3));
+
+  return {
+    levelR,
+    triggered,
+    lossesSaved,
+    winnersCut,
+    savedR: Number(savedR.toFixed(3)),
+    cutR: Number(cutR.toFixed(3)),
+    deltaExpectancy,
+  };
+}
+
+function analyzeBeFromOutcomes(
+  list: UnifiedEvent[],
+  suggestedTpR: number | null
+): BeAnalysis {
   const peaks = meaningfulRetestPeaks(list);
+  const scored = list
+    .filter(
+      (e) =>
+        typeof e.resultR === 'number' &&
+        typeof e.maxBeforeRetest === 'number' &&
+        Number.isFinite(e.maxBeforeRetest) &&
+        (e.maxBeforeRetest as number) >= BE_RETEST_MIN_R
+    )
+    .map((e) => ({
+      resultR: e.resultR as number,
+      maxBeforeRetest: e.maxBeforeRetest as number,
+    }));
+
+  const candidateLevels = BE_CANDIDATE_LEVELS.filter(
+    (r) => suggestedTpR == null || r < suggestedTpR
+  );
+
+  const levels = candidateLevels.map((levelR) => scoreBeLevel(scored, levelR));
+
+  const eligible = levels.filter(
+    (l) =>
+      l.triggered >= BE_OUTCOME_MIN_TRIGGERS &&
+      l.deltaExpectancy != null
+  );
+
+  const bestProtect = [...eligible]
+    .filter((l) => (l.deltaExpectancy as number) > 0)
+    .sort((a, b) => (b.deltaExpectancy as number) - (a.deltaExpectancy as number))[0];
+
+  if (bestProtect) {
+    return {
+      withRetestSample: peaks.length,
+      medianMaxBeforeRetest: medianOrNull(peaks),
+      scoredSample: scored.length,
+      levels,
+      suggestedBeR: bestProtect.levelR,
+      beSource: 'outcome',
+      beVerdict: 'protect',
+      beDeltaExpectancy: bestProtect.deltaExpectancy,
+      hint: `Move to BE after +${bestProtect.levelR}R then retest — saved ${bestProtect.lossesSaved} losses (${bestProtect.savedR}R) vs cut ${bestProtect.winnersCut} winners (${bestProtect.cutR}R); Δ ${bestProtect.deltaExpectancy}R/trade.`,
+    };
+  }
+
+  if (scored.length >= BE_OUTCOME_MIN_TRIGGERS && eligible.length > 0) {
+    const worstCost = [...eligible].sort(
+      (a, b) => (b.deltaExpectancy as number) - (a.deltaExpectancy as number)
+    )[0];
+    return {
+      withRetestSample: peaks.length,
+      medianMaxBeforeRetest: medianOrNull(peaks),
+      scoredSample: scored.length,
+      levels,
+      suggestedBeR: null,
+      beSource: 'outcome',
+      beVerdict: 'hold',
+      beDeltaExpectancy: worstCost?.deltaExpectancy ?? null,
+      hint:
+        worstCost != null
+          ? `Hold for TP — BE after retest would cut more winners than it saves (best Δ ${worstCost.deltaExpectancy}R/trade at ${worstCost.levelR}R).`
+          : 'Hold for TP — BE after retest does not improve expectancy in this sample.',
+    };
+  }
+
+  // Not enough outcome+retest data — fall back to peak median, then caller may use Max RR
   const fromRetest = suggestedBeFromRetests(peaks, suggestedTpR);
+  if (fromRetest != null) {
+    return {
+      withRetestSample: peaks.length,
+      medianMaxBeforeRetest: medianOrNull(peaks),
+      scoredSample: scored.length,
+      levels,
+      suggestedBeR: fromRetest,
+      beSource: 'retest',
+      beVerdict: 'protect',
+      beDeltaExpectancy: null,
+      hint: `Peak-before-retest median suggests BE after +${fromRetest}R (need more logged outcomes to confirm protect vs hold).`,
+    };
+  }
+
   return {
     withRetestSample: peaks.length,
     medianMaxBeforeRetest: medianOrNull(peaks),
-    suggestedBeR: fromRetest,
-    beSource: (fromRetest != null
-      ? 'retest'
-      : null) as 'retest' | 'max_rr_fallback' | null,
+    scoredSample: scored.length,
+    levels,
+    suggestedBeR: null,
+    beSource: null,
+    beVerdict: null,
+    beDeltaExpectancy: null,
+    hint: null,
   };
 }
 
@@ -795,15 +959,22 @@ function metricsForEvents(list: UnifiedEvent[]) {
     .filter((n): n is number => typeof n === 'number');
   const hitRates = hitRatesForMaxes(maxes);
   const suggestedTpR = suggestedTpFromHits(hitRates);
-  const retestBe = beMetricsFromEvents(list, suggestedTpR);
+  const be = analyzeBeFromOutcomes(list, suggestedTpR);
   const fallbackBe = suggestedBeFromHits(hitRates, suggestedTpR);
-  const suggestedBeR = retestBe.suggestedBeR ?? fallbackBe;
-  const beSource: 'retest' | 'max_rr_fallback' | null =
-    retestBe.suggestedBeR != null
-      ? 'retest'
-      : fallbackBe != null
-        ? 'max_rr_fallback'
-        : null;
+
+  let suggestedBeR = be.suggestedBeR;
+  let beSource: BeSource = be.beSource;
+  let beVerdict: BeVerdict = be.beVerdict;
+  let hint = be.hint;
+  let beDeltaExpectancy = be.beDeltaExpectancy;
+
+  if (be.beSource == null && fallbackBe != null) {
+    suggestedBeR = fallbackBe;
+    beSource = 'max_rr_fallback';
+    beVerdict = 'protect';
+    beDeltaExpectancy = null;
+    hint = `Max RR fallback — BE after +${fallbackBe}R (log maxBeforeRetest + results for protect vs hold).`;
+  }
 
   const asTrades = list
     .filter((e) => e.source === 'taken' && e.checklist?.length)
@@ -823,9 +994,14 @@ function metricsForEvents(list: UnifiedEvent[]) {
     hitRates,
     suggestedTpR,
     suggestedBeR,
-    withRetestSample: retestBe.withRetestSample,
-    medianMaxBeforeRetest: retestBe.medianMaxBeforeRetest,
+    withRetestSample: be.withRetestSample,
+    medianMaxBeforeRetest: be.medianMaxBeforeRetest,
+    beScoredSample: be.scoredSample,
+    beLevels: be.levels,
     beSource,
+    beVerdict,
+    beDeltaExpectancy,
+    beHint: hint,
     checklistImpact: computeChecklistImpact(asTrades),
   };
 }
@@ -1077,14 +1253,20 @@ export async function getUnifiedInsights(
     recommendedTpR: overallMetrics.suggestedTpR,
     recommendedBeR: overallMetrics.suggestedBeR,
     beSource: overallMetrics.beSource,
+    beVerdict: overallMetrics.beVerdict,
+    beDeltaExpectancy: overallMetrics.beDeltaExpectancy,
+    beHint: overallMetrics.beHint,
     retestBe: {
       sample: overallMetrics.withRetestSample,
+      scoredSample: overallMetrics.beScoredSample,
       medianMaxBeforeRetest: overallMetrics.medianMaxBeforeRetest,
-      suggestedBeR:
-        overallMetrics.beSource === 'retest' ? overallMetrics.suggestedBeR : null,
+      levels: overallMetrics.beLevels,
+      suggestedBeR: overallMetrics.suggestedBeR,
+      beVerdict: overallMetrics.beVerdict,
+      beDeltaExpectancy: overallMetrics.beDeltaExpectancy,
       minPeakR: BE_RETEST_MIN_R,
       note:
-        'maxBeforeRetest = max R before first return to entry. Only peaks ≥0.5R count; leave blank for noise scratches.',
+        'BE counterfactual: if maxBeforeRetest ≥ level then flatten at 0R. Losses saved vs winners cut → protect if ΔR/trade > 0, else hold for TP.',
     },
     bestTimes,
     bestSlot,
