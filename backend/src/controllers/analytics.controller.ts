@@ -6,7 +6,7 @@ import {
   type AnalyticsSource,
   type TimeSlotMinutes,
 } from '../services/analytics.service';
-import { generateAiInsights } from '../services/gemini.service';
+import { coachChat, generateAiInsights } from '../services/gemini.service';
 
 export const dashboard = asyncHandler(async (req, res) => {
   const data = await getDashboardAnalytics(req.user!.id, {
@@ -67,5 +67,15 @@ export const aiInsights = asyncHandler(async (req, res) => {
     raw === 'taken' || raw === 'not_taken' || raw === 'combined' ? raw : 'combined'
   ) as AnalyticsSource;
   const data = await generateAiInsights(req.user!.id, source);
+  sendSuccess(res, data);
+});
+
+export const coachChatHandler = asyncHandler(async (req, res) => {
+  const body = req.body as {
+    message: string;
+    source: AnalyticsSource;
+    history: Array<{ role: 'user' | 'assistant'; content: string }>;
+  };
+  const data = await coachChat(req.user!.id, body);
   sendSuccess(res, data);
 });

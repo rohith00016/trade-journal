@@ -191,3 +191,17 @@ export const dayReviewSchema = z.object({
     )
     .default([]),
 });
+
+export const coachChatSchema = z.object({
+  message: z.string().trim().min(1, 'Message is required').max(2000),
+  source: z.enum(['taken', 'not_taken', 'combined']).default('combined'),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().trim().min(1).max(8000),
+      })
+    )
+    .max(20)
+    .default([]),
+});

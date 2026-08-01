@@ -43,6 +43,22 @@ Required markdown structure:
 
 Be concise. Short bullets. Frame as journal observations, not financial advice.`;
 
+const COACH_CHAT_PROMPT = `You are a trading-journal strategy coach for discretionary traders.
+You ONLY use the journal analytics JSON attached below (and the conversation). Do not invent trades, win rates, or R numbers.
+
+Goals:
+- Help the trader improve their written strategy: TP/BE, checklist rules (keep/cut/review), best IST times, 2nd-setup-of-day rules.
+- Answer the trader's question directly. Be concrete and actionable.
+- When sample sizes are small (counts or secondTradeCount near 0), say so — do not invent caution or edge from empty data.
+- Prefer short markdown: bullets, bold key levels (e.g. **1.5R**). No long essays.
+- Frame as journal observations, not financial advice or trade signals.
+
+Hit-rate / checklist reading (same as analytics):
+- pct at ≥XR = Max RR reached that level — use for TP fill likelihood.
+- beVerdict protect = move to BE after that run then retest; hold = do not BE early.
+- checklist: keep / cut / review / needs_data.
+- sequence: 2nd setup after first win/loss under the current source filter (combined includes skipped setups).`;
+
 function compactSlots(slots: BestTimeSlot[], limit = 12) {
   return slots
     .filter((s) => s.count >= 2)
@@ -192,7 +208,19 @@ function buildPayload(insights: Awaited<ReturnType<typeof getUnifiedInsights>>) 
   };
 }
 
-async function callGemini(userContent: string): Promise<string> {
+type GeminiContent = {
+  role: 'user' | 'model';
+  parts: Array<{ text: string }>;
+};
+
+async function callGemini(
+  contents: GeminiContent[],
+  options?: {
+    systemPrompt?: string;
+    temperature?: number;
+    maxOutputTokens?: number;
+  }
+): Promise<string> {
   if (!env.geminiApiKey) {
     throw new AppError(
       'Gemini is not configured. Set GEMINI_API_KEY on the API.',
@@ -207,11 +235,13 @@ async function callGemini(userContent: string): Promise<string> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: 'user', parts: [{ text: userContent }] }],
+      systemInstruction: {
+        parts: [{ text: options?.systemPrompt ?? SYSTEM_PROMPT }],
+      },
+      contents,
       generationConfig: {
-        temperature: 0.35,
-        maxOutputTokens: 1600,
+        temperature: options?.temperature ?? 0.35,
+        maxOutputTokens: options?.maxOutputTokens ?? 1600,
       },
     }),
   });
@@ -260,7 +290,9 @@ export async function generateAiInsights(
   }
 
   const userContent = `Journal analytics JSON (IST). Lead with TP (Max RR) and BE (prefer outcome protect vs hold from retestBe):\n\n${JSON.stringify(payload)}`;
-  const markdown = await callGemini(userContent);
+  const markdown = await callGemini([
+    { role: 'user', parts: [{ text: userContent }] },
+  ]);
 
   return {
     markdown,
@@ -270,5 +302,71 @@ export async function generateAiInsights(
     recommendedTpR: payload.recommendedTpR,
     recommendedBeR: payload.recommendedBeR,
     beVerdict: payload.beVerdict,
+  };
+}
+
+export type CoachChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+const MAX_HISTORY = 16;
+
+export async function coachChat(
+  userId: string,
+  input: {
+    message: string;
+    source?: AnalyticsSource;
+    history?: CoachChatMessage[];
+  }
+) {
+  const source = input.source ?? 'combined';
+  const message = input.message.trim();
+  if (!message) {
+    throw new AppError('Message is required', 400);
+  }
+
+  const insights = await getUnifiedInsights(userId, source);
+  const payload = buildPayload(insights);
+
+  const history = (input.history ?? [])
+    .filter((m) => m.content.trim())
+    .slice(-MAX_HISTORY);
+
+  const systemPrompt = `${COACH_CHAT_PROMPT}
+
+## Journal analytics context (IST, source=${source})
+Use this JSON as ground truth. Sample size: ${insights.counts.filtered} events.
+
+${JSON.stringify(payload)}`;
+
+  const contents: GeminiContent[] = [];
+  for (const m of history) {
+    contents.push({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    });
+  }
+  contents.push({ role: 'user', parts: [{ text: message }] });
+
+  // Gemini requires the first content role to be user
+  if (contents[0]?.role === 'model') {
+    contents.unshift({
+      role: 'user',
+      parts: [{ text: '(continuing strategy discussion)' }],
+    });
+  }
+
+  const reply = await callGemini(contents, {
+    systemPrompt,
+    temperature: 0.45,
+    maxOutputTokens: 1200,
+  });
+
+  return {
+    reply,
+    model: env.geminiModel,
+    sample: insights.counts.filtered,
+    source,
   };
 }

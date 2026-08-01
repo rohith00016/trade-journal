@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton'
 import { ApiError } from '@/lib/api'
 import { formatR, cn } from '@/lib/utils'
+import { CoachChat } from './coach-chat'
 
 const SOURCES: { id: InsightsSource; label: string }[] = [
   { id: 'combined', label: 'Combined' },
@@ -194,6 +195,8 @@ export function AnalyticsPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <CoachChat source={source} />
 
       {data.bestSlot ? (
         <Card className="border-border/80 bg-muted/10">

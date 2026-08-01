@@ -259,3 +259,29 @@ export function useAiInsights() {
       }),
   })
 }
+
+export type CoachChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type CoachChatResponse = {
+  reply: string
+  model: string
+  sample: number
+  source: InsightsSource
+}
+
+export function useCoachChat() {
+  return useMutation({
+    mutationFn: (input: {
+      message: string
+      source: InsightsSource
+      history: CoachChatMessage[]
+    }) =>
+      api<CoachChatResponse>('/analytics/coach-chat', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+  })
+}

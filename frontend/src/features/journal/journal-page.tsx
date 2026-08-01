@@ -659,6 +659,14 @@ function GalleryView({
               {slide.entry.symbol || 'Trade'} ·{' '}
               {slide.entry.resultR == null ? '—' : formatR(slide.entry.resultR)}
             </p>
+            <p className="truncate text-[10px] text-white/80">
+              Max {slide.entry.maximumRr != null ? `${slide.entry.maximumRr}R` : '—'}
+              {' · '}
+              Retest{' '}
+              {slide.entry.maxBeforeRetest != null
+                ? `${slide.entry.maxBeforeRetest}R`
+                : '—'}
+            </p>
             <p className="text-[10px] text-white/70">
               {format(new Date(slide.entry.date), 'MMM d')} ·{' '}
               {slide.entry.source === 'taken' ? 'Taken' : 'Not taken'}
@@ -727,6 +735,13 @@ function CarouselModal({
               {slide.entry.resultR == null ? '—' : formatR(slide.entry.resultR)}
             </p>
             <p className="text-xs text-white/60">
+              Max {slide.entry.maximumRr != null ? `${slide.entry.maximumRr}R` : '—'}
+              {' · '}
+              Before retest{' '}
+              {slide.entry.maxBeforeRetest != null
+                ? `${slide.entry.maxBeforeRetest}R`
+                : '—'}
+              {' · '}
               {format(new Date(slide.entry.date), 'MMM d, HH:mm')} ·{' '}
               {index + 1}/{slides.length}
               {slide.entry.strategyName ? ` · ${slide.entry.strategyName}` : ''}
