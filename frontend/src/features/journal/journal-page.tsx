@@ -13,7 +13,7 @@ import { motion } from 'framer-motion'
 import {
   ChevronLeft,
   ChevronRight,
-  Download,
+  ClipboardCopy,
   ImagePlus,
   LayoutGrid,
   LayoutList,
@@ -177,7 +177,7 @@ export function JournalPage() {
     setToDate('')
   }
 
-  async function onExportJson() {
+  async function onCopyJson() {
     try {
       const params: Record<string, string | undefined> = {
         source: filter,
@@ -186,19 +186,10 @@ export function JournalPage() {
       if (toDate) params.to = fromDateInputEnd(toDate)
 
       const payload = await exportJournal.mutateAsync(params)
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: 'application/json',
-      })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      const stamp = format(new Date(), 'yyyy-MM-dd')
-      a.href = url
-      a.download = `trade-journal-${filter}-${stamp}.json`
-      a.click()
-      URL.revokeObjectURL(url)
-      toast.success(`Exported ${payload.count} entries (no screenshots)`)
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+      toast.success(`Copied ${payload.count} entries to clipboard (no screenshots)`)
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Export failed')
+      toast.error(err instanceof ApiError ? err.message : 'Copy failed')
     }
   }
 
@@ -263,10 +254,10 @@ export function JournalPage() {
             variant="outline"
             size="sm"
             disabled={exportJournal.isPending}
-            onClick={() => void onExportJson()}
+            onClick={() => void onCopyJson()}
           >
-            <Download className="h-3.5 w-3.5" />
-            {exportJournal.isPending ? 'Exporting…' : 'Export JSON'}
+            <ClipboardCopy className="h-3.5 w-3.5" />
+            {exportJournal.isPending ? 'Copying…' : 'Copy JSON'}
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={() => openNew('not_taken')}>
             Log not-taken
