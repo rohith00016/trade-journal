@@ -21,6 +21,22 @@ export const list = asyncHandler(async (req, res) => {
   sendSuccess(res, result);
 });
 
+export const exportJson = asyncHandler(async (req, res) => {
+  const raw = String(req.query.source || 'combined');
+  const source = (
+    raw === 'taken' || raw === 'not_taken' || raw === 'combined' ? raw : 'combined'
+  ) as JournalSource | 'combined';
+
+  const data = await journalService.exportJournalEntries(req.user!.id, {
+    source,
+    strategyId: req.query.strategyId as string | undefined,
+    symbol: req.query.symbol as string | undefined,
+    from: req.query.from ? new Date(String(req.query.from)) : undefined,
+    to: req.query.to ? new Date(String(req.query.to)) : undefined,
+  });
+  sendSuccess(res, data);
+});
+
 export const getOne = asyncHandler(async (req, res) => {
   const entry = await journalService.getJournalEntry(
     req.user!.id,

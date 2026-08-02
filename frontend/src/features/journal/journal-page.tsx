@@ -13,6 +13,7 @@ import { motion } from 'framer-motion'
 import {
   ChevronLeft,
   ChevronRight,
+  Download,
   ImagePlus,
   LayoutGrid,
   LayoutList,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react'
 import {
   useDeleteJournalEntry,
+  useExportJournal,
   useJournalEntries,
 } from '@/lib/hooks'
 import type { InsightsSource, JournalEntry, JournalSource } from '@/types'
@@ -104,6 +106,7 @@ export function JournalPage() {
 
   const { data, isLoading } = useJournalEntries(queryParams)
   const deleteEntry = useDeleteJournalEntry()
+  const exportJournal = useExportJournal()
 
   const drawerOpen = showNewTaken || showNewNotTaken || Boolean(editing)
 
@@ -174,6 +177,31 @@ export function JournalPage() {
     setToDate('')
   }
 
+  async function onExportJson() {
+    try {
+      const params: Record<string, string | undefined> = {
+        source: filter,
+      }
+      if (fromDate) params.from = fromDateInputStart(fromDate)
+      if (toDate) params.to = fromDateInputEnd(toDate)
+
+      const payload = await exportJournal.mutateAsync(params)
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const stamp = format(new Date(), 'yyyy-MM-dd')
+      a.href = url
+      a.download = `trade-journal-${filter}-${stamp}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success(`Exported ${payload.count} entries (no screenshots)`)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Export failed')
+    }
+  }
+
   function openCarouselAt(entry: JournalEntry, shotUrl?: string) {
     if (!gallerySlides.length) return
     const idx = shotUrl
@@ -230,6 +258,16 @@ export function JournalPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={exportJournal.isPending}
+            onClick={() => void onExportJson()}
+          >
+            <Download className="h-3.5 w-3.5" />
+            {exportJournal.isPending ? 'Exporting…' : 'Export JSON'}
+          </Button>
           <Button type="button" variant="outline" size="sm" onClick={() => openNew('not_taken')}>
             Log not-taken
           </Button>

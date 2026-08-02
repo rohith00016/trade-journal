@@ -6,6 +6,7 @@ import { journalEntrySchema, journalEntryUpdateSchema } from '../validators/sche
 const router = Router();
 
 router.get('/', journalController.list);
+router.get('/export', journalController.exportJson);
 router.get('/:id', journalController.getOne);
 router.post('/', validate(journalEntrySchema), journalController.create);
 router.put('/:id', validate(journalEntryUpdateSchema), journalController.update);

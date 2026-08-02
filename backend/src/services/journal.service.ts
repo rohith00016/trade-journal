@@ -209,6 +209,45 @@ export async function listJournalEntries(
   };
 }
 
+/** Full journal dump for download — omits screenshot URLs only. */
+export async function exportJournalEntries(
+  userId: string,
+  filters: {
+    source?: JournalSource | 'combined';
+    strategyId?: string;
+    symbol?: string;
+    from?: Date;
+    to?: Date;
+  } = {}
+) {
+  await migrateLegacyJournal(userId);
+
+  const query: Record<string, unknown> = { userId };
+  if (filters.source === 'taken' || filters.source === 'not_taken') {
+    query.source = filters.source;
+  }
+  if (filters.strategyId) query.strategyId = filters.strategyId;
+  if (filters.symbol) query.symbol = filters.symbol.toUpperCase();
+  if (filters.from || filters.to) {
+    query.date = {
+      ...(filters.from ? { $gte: filters.from } : {}),
+      ...(filters.to ? { $lte: filters.to } : {}),
+    };
+  }
+
+  const docs = await JournalEntry.find(query)
+    .sort({ date: 1, createdAt: 1 })
+    .select('-screenshots -__v')
+    .lean();
+
+  return {
+    exportedAt: new Date().toISOString(),
+    source: filters.source ?? 'combined',
+    count: docs.length,
+    entries: docs,
+  };
+}
+
 export async function getJournalEntry(userId: string, id: string) {
   await migrateLegacyJournal(userId);
   const entry = await JournalEntry.findOne({ _id: id, userId });

@@ -157,6 +157,28 @@ export function useDeleteJournalEntry() {
   })
 }
 
+export type JournalExportPayload = {
+  exportedAt: string
+  source: InsightsSource
+  count: number
+  entries: Omit<JournalEntry, 'screenshots'>[]
+}
+
+export function useExportJournal() {
+  return useMutation({
+    mutationFn: async (params?: Record<string, string | undefined>) => {
+      const search = new URLSearchParams()
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          if (v !== undefined && v !== '') search.set(k, v)
+        })
+      }
+      const qs = search.toString()
+      return api<JournalExportPayload>(`/journal/export${qs ? `?${qs}` : ''}`)
+    },
+  })
+}
+
 /** Dashboard still expects trade-shaped taken entries */
 export function useTrades(params?: Record<string, string | number | undefined>) {
   return useQuery({
