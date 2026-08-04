@@ -240,11 +240,42 @@ export async function exportJournalEntries(
     .select('-screenshots -__v')
     .lean();
 
+  const entries = docs.map((e) => ({
+    _id: String(e._id),
+    source: e.source,
+    date: e.date,
+    accountId: e.accountId ? String(e.accountId) : undefined,
+    strategyId: e.strategyId ? String(e.strategyId) : undefined,
+    strategyVersion: e.strategyVersion,
+    strategyName: e.strategyName,
+    symbol: e.symbol,
+    direction: e.direction,
+    entry: e.entry,
+    exit: e.exit,
+    stopLoss: e.stopLoss,
+    takeProfit: e.takeProfit,
+    risk: e.risk,
+    contracts: e.contracts,
+    resultUsd: e.resultUsd,
+    resultR: e.resultR,
+    maximumRr: e.maximumRr ?? null,
+    maxBeforeRetest: e.maxBeforeRetest ?? null,
+    commission: e.commission,
+    session: e.session,
+    notes: e.notes,
+    checklist: e.checklist ?? [],
+    psychologyTags: e.psychologyTags ?? [],
+    valid: e.valid,
+    outcome: e.outcome,
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+  }));
+
   return {
     exportedAt: new Date().toISOString(),
     source: filters.source ?? 'combined',
-    count: docs.length,
-    entries: docs,
+    count: entries.length,
+    entries,
   };
 }
 
@@ -279,11 +310,12 @@ export async function createJournalEntry(userId: string, data: JournalEntryInput
     userId,
     accountId: accountId || undefined,
     outcome,
-    // Sizing / $ PnL optional for both sources
     resultUsd: data.resultUsd,
     risk: data.risk,
     contracts: data.contracts,
     commission: data.commission ?? 0,
+    maximumRr: data.maximumRr,
+    maxBeforeRetest: data.maxBeforeRetest,
     symbol: data.symbol ? data.symbol.toUpperCase() : undefined,
     screenshots: data.screenshots ?? [],
     checklist: data.checklist ?? [],
