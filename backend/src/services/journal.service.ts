@@ -30,6 +30,8 @@ export type JournalEntryInput = {
   maximumRr?: number;
   maxBeforeRetest?: number;
   retestCount?: number;
+  /** Peak before each retest: [0]=1st, [1]=2nd, … */
+  retestPeaks?: number[];
   maxAfterFirstRetest?: number;
   commission?: number;
   session?: 'asia' | 'london' | 'newyork' | 'overlap' | 'other';
@@ -80,6 +82,58 @@ function assertTaken(data: JournalEntryInput) {
 
 function assertNotTaken(data: JournalEntryInput) {
   assertTradeCore(data);
+}
+
+/** Keep retestPeaks + legacy maxBeforeRetest / maxAfterFirstRetest in sync. */
+export function normalizeRetestFields(data: {
+  retestCount?: number | null;
+  retestPeaks?: number[] | null;
+  maxBeforeRetest?: number | null;
+  maxAfterFirstRetest?: number | null;
+}) {
+  let peaks = (data.retestPeaks ?? []).filter(
+    (n): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0
+  );
+
+  if (!peaks.length) {
+    if (typeof data.maxBeforeRetest === 'number' && data.maxBeforeRetest > 0) {
+      peaks.push(data.maxBeforeRetest);
+    }
+    if (
+      typeof data.maxAfterFirstRetest === 'number' &&
+      data.maxAfterFirstRetest > 0
+    ) {
+      if (peaks.length === 0) peaks.push(data.maxAfterFirstRetest);
+      else peaks.push(data.maxAfterFirstRetest);
+    }
+  }
+
+  const count =
+    data.retestCount == null || !Number.isFinite(data.retestCount)
+      ? peaks.length > 0
+        ? peaks.length
+        : undefined
+      : Math.max(0, Math.min(20, Math.floor(data.retestCount)));
+
+  if (count === 0) {
+    return {
+      retestCount: 0 as number | undefined,
+      retestPeaks: [] as number[],
+      maxBeforeRetest: undefined as number | undefined,
+      maxAfterFirstRetest: undefined as number | undefined,
+    };
+  }
+
+  if (typeof count === 'number') {
+    peaks = peaks.slice(0, count);
+  }
+
+  return {
+    retestCount: count,
+    retestPeaks: peaks,
+    maxBeforeRetest: peaks[0],
+    maxAfterFirstRetest: peaks[1],
+  };
 }
 
 export async function migrateLegacyJournal(userId: string) {
@@ -306,9 +360,12 @@ export async function createJournalEntry(userId: string, data: JournalEntryInput
     await getOwnedAccount(userId, accountId);
   }
 
+  const retest = normalizeRetestFields(data);
+
   return JournalEntry.create({
     ...data,
     ...strategyFields,
+    ...retest,
     userId,
     accountId: accountId || undefined,
     outcome,
@@ -317,9 +374,6 @@ export async function createJournalEntry(userId: string, data: JournalEntryInput
     contracts: data.contracts,
     commission: data.commission ?? 0,
     maximumRr: data.maximumRr,
-    maxBeforeRetest: data.maxBeforeRetest,
-    retestCount: data.retestCount,
-    maxAfterFirstRetest: data.maxAfterFirstRetest,
     symbol: data.symbol ? data.symbol.toUpperCase() : undefined,
     screenshots: data.screenshots ?? [],
     checklist: data.checklist ?? [],
@@ -354,6 +408,7 @@ export async function updateJournalEntry(
     maximumRr: data.maximumRr ?? existing.maximumRr,
     maxBeforeRetest: data.maxBeforeRetest ?? existing.maxBeforeRetest,
     retestCount: data.retestCount ?? existing.retestCount,
+    retestPeaks: data.retestPeaks ?? existing.retestPeaks,
     maxAfterFirstRetest: data.maxAfterFirstRetest ?? existing.maxAfterFirstRetest,
     commission: data.commission ?? existing.commission,
     session: data.session ?? existing.session,
@@ -380,10 +435,12 @@ export async function updateJournalEntry(
 
   const strategyFields = await enrichStrategyFields(userId, merged.strategyId);
   const outcome = outcomeFromR(merged.resultR!);
+  const retest = normalizeRetestFields(merged);
 
   existing.set({
     ...merged,
     ...strategyFields,
+    ...retest,
     outcome,
     symbol: merged.symbol ? merged.symbol.toUpperCase() : undefined,
   });

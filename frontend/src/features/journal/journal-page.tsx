@@ -690,20 +690,22 @@ function GalleryView({
             </p>
             <p className="truncate text-[10px] text-white/80">
               Max {slide.entry.maximumRr != null ? `${slide.entry.maximumRr}R` : '—'}
-              {' · '}
-              1st{' '}
-              {slide.entry.maxBeforeRetest != null
-                ? `${slide.entry.maxBeforeRetest}R`
-                : '—'}
-              {slide.entry.retestCount != null && slide.entry.retestCount >= 2 ? (
-                <>
-                  {' · '}
-                  2nd{' '}
-                  {slide.entry.maxAfterFirstRetest != null
-                    ? `${slide.entry.maxAfterFirstRetest}R`
-                    : '—'}
-                </>
-              ) : null}
+              {(() => {
+                const peaks =
+                  slide.entry.retestPeaks?.length
+                    ? slide.entry.retestPeaks
+                    : [
+                        slide.entry.maxBeforeRetest,
+                        slide.entry.maxAfterFirstRetest,
+                      ].filter((n): n is number => n != null)
+                if (!peaks.length) return null
+                return (
+                  <>
+                    {' · '}
+                    {peaks.map((p, i) => `${i + 1}:${p}R`).join(' · ')}
+                  </>
+                )
+              })()}
               {slide.entry.retestCount != null ? (
                 <> · {slide.entry.retestCount} retest{slide.entry.retestCount === 1 ? '' : 's'}</>
               ) : null}
@@ -777,20 +779,23 @@ function CarouselModal({
             </p>
             <p className="text-xs text-white/60">
               Max {slide.entry.maximumRr != null ? `${slide.entry.maximumRr}R` : '—'}
-              {' · '}
-              1st retest peak{' '}
-              {slide.entry.maxBeforeRetest != null
-                ? `${slide.entry.maxBeforeRetest}R`
-                : '—'}
-              {slide.entry.retestCount != null && slide.entry.retestCount >= 2 ? (
-                <>
-                  {' · '}
-                  2nd leg{' '}
-                  {slide.entry.maxAfterFirstRetest != null
-                    ? `${slide.entry.maxAfterFirstRetest}R`
-                    : '—'}
-                </>
-              ) : null}
+              {(() => {
+                const peaks =
+                  slide.entry.retestPeaks?.length
+                    ? slide.entry.retestPeaks
+                    : [
+                        slide.entry.maxBeforeRetest,
+                        slide.entry.maxAfterFirstRetest,
+                      ].filter((n): n is number => n != null)
+                if (!peaks.length) return null
+                return (
+                  <>
+                    {' · '}
+                    peaks{' '}
+                    {peaks.map((p, i) => `${i + 1}=${p}R`).join(', ')}
+                  </>
+                )
+              })()}
               {slide.entry.retestCount != null ? (
                 <> · {slide.entry.retestCount} retest(s)</>
               ) : null}

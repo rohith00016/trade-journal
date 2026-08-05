@@ -28,11 +28,16 @@ export interface IJournalEntry extends Document {
   resultUsd?: number;
   resultR?: number;
   maximumRr?: number;
-  /** Max R reached before price first retested entry. Empty if no meaningful retest. */
+  /** Max R reached before price first retested entry. Synced from retestPeaks[0]. */
   maxBeforeRetest?: number;
   /** Times price returned to entry/BE (meaningful retests). Omit if not logged. */
   retestCount?: number;
-  /** Peak on 2nd push before 2nd retest — when retestCount ≥ 2. */
+  /**
+   * Peak before each retest: [0]=before 1st, [1]=before 2nd, …
+   * Length should match retestCount when logged.
+   */
+  retestPeaks?: number[];
+  /** Peak before 2nd retest — synced from retestPeaks[1] for analytics. */
   maxAfterFirstRetest?: number;
   commission?: number;
   session?: TradeSession;
@@ -84,6 +89,7 @@ const journalEntrySchema = new Schema<IJournalEntry>(
     maximumRr: Number,
     maxBeforeRetest: Number,
     retestCount: Number,
+    retestPeaks: { type: [Number], default: undefined },
     maxAfterFirstRetest: Number,
     commission: { type: Number, default: 0 },
     session: {

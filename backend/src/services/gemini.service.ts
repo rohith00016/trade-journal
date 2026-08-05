@@ -57,9 +57,9 @@ Hit-rate / checklist reading (same as analytics):
 - pct at ≥XR = Max RR reached that level — use for TP fill likelihood.
 - beVerdict protect = move to BE after that run then retest; hold = do not BE early.
 - checklist: keep / cut / review / needs_data.
-- maxBeforeRetest = peak before 1st return to entry; retestCount = # of retests; maxAfterFirstRetest = peak before 2nd retest when retestCount ≥ 2.
+- maxBeforeRetest / retestPeaks[0] = peak before 1st return to entry; retestCount = # of retests; retestPeaks[i] = peak before (i+1)th retest; maxAfterFirstRetest = retestPeaks[1].
 - retestContinuation.afterFirstRetest = stats after 1st retest (did price run further toward TP?).
-- secondLegBe = BE counterfactual on 2nd leg using maxAfterFirstRetest.`;
+- secondLegBe = BE counterfactual on 2nd leg using peak before 2nd retest.`;
 
 function compactSlots(slots: BestTimeSlot[], limit = 12) {
   return slots

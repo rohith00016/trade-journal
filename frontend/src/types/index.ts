@@ -130,7 +130,9 @@ export interface JournalEntry {
   maxBeforeRetest?: number
   /** Times price returned to entry/BE */
   retestCount?: number
-  /** Peak before 2nd retest when retestCount ≥ 2 */
+  /** Peak before each retest: [0]=1st, [1]=2nd, … */
+  retestPeaks?: number[]
+  /** Peak before 2nd retest — synced from retestPeaks[1] */
   maxAfterFirstRetest?: number
   commission?: number
   session?: TradeSession

@@ -528,6 +528,7 @@ type UnifiedEvent = {
   /** Max R before first retest of entry */
   maxBeforeRetest?: number;
   retestCount?: number;
+  retestPeaks?: number[];
   /** Peak before 2nd retest when retestCount ≥ 2 */
   maxAfterFirstRetest?: number;
   resultR?: number;
@@ -823,41 +824,56 @@ function analyzeBeFromOutcomes(
   };
 }
 
+function peakBeforeNthRetest(e: UnifiedEvent, n: number): number | undefined {
+  const fromArr = e.retestPeaks?.[n - 1];
+  if (typeof fromArr === 'number' && Number.isFinite(fromArr) && fromArr > 0) {
+    return fromArr;
+  }
+  if (n === 1 && typeof e.maxBeforeRetest === 'number') return e.maxBeforeRetest;
+  if (n === 2 && typeof e.maxAfterFirstRetest === 'number') {
+    return e.maxAfterFirstRetest;
+  }
+  return undefined;
+}
+
 function hasMeaningfulFirstRetest(e: UnifiedEvent) {
   if (typeof e.retestCount === 'number' && e.retestCount >= 1) return true;
-  return (
-    typeof e.maxBeforeRetest === 'number' &&
-    e.maxBeforeRetest >= BE_RETEST_MIN_R
-  );
+  const p1 = peakBeforeNthRetest(e, 1);
+  return p1 != null && p1 >= BE_RETEST_MIN_R;
 }
 
 function computeRetestContinuation(list: UnifiedEvent[]) {
   const afterFirstRetest = list.filter(hasMeaningfulFirstRetest);
-  const withPeaks = afterFirstRetest.filter(
-    (e) =>
+  const withPeaks = afterFirstRetest.filter((e) => {
+    const p1 = peakBeforeNthRetest(e, 1);
+    return (
       typeof e.maximumRr === 'number' &&
-      typeof e.maxBeforeRetest === 'number' &&
-      e.maxBeforeRetest >= BE_RETEST_MIN_R
-  );
-  const continued = withPeaks.filter(
-    (e) => (e.maximumRr as number) > (e.maxBeforeRetest as number)
-  );
+      p1 != null &&
+      p1 >= BE_RETEST_MIN_R
+    );
+  });
+  const continued = withPeaks.filter((e) => {
+    const p1 = peakBeforeNthRetest(e, 1)!;
+    return (e.maximumRr as number) > p1;
+  });
   const continuedPct =
     withPeaks.length === 0
       ? null
       : Number(((continued.length / withPeaks.length) * 100).toFixed(1));
-  const extraRs = continued.map(
-    (e) => (e.maximumRr as number) - (e.maxBeforeRetest as number)
-  );
+  const extraRs = continued.map((e) => {
+    const p1 = peakBeforeNthRetest(e, 1)!;
+    return (e.maximumRr as number) - p1;
+  });
 
-  const secondLegSample = list.filter(
-    (e) =>
-      typeof e.retestCount === 'number' &&
-      e.retestCount >= 2 &&
-      typeof e.maxAfterFirstRetest === 'number' &&
-      e.maxAfterFirstRetest >= BE_RETEST_MIN_R
-  );
-  const secondPeaks = secondLegSample.map((e) => e.maxAfterFirstRetest as number);
+  const secondLegSample = list.filter((e) => {
+    const p2 = peakBeforeNthRetest(e, 2);
+    const count =
+      typeof e.retestCount === 'number'
+        ? e.retestCount
+        : e.retestPeaks?.length ?? 0;
+    return count >= 2 && p2 != null && p2 >= BE_RETEST_MIN_R;
+  });
+  const secondPeaks = secondLegSample.map((e) => peakBeforeNthRetest(e, 2)!);
 
   return {
     afterFirstRetest: {
@@ -879,24 +895,28 @@ function analyzeSecondLegBe(
   suggestedTpR: number | null
 ): BeAnalysis {
   const peaks = list
-    .map((e) => e.maxAfterFirstRetest)
+    .map((e) => peakBeforeNthRetest(e, 2))
     .filter(
       (n): n is number =>
         typeof n === 'number' && Number.isFinite(n) && n >= BE_RETEST_MIN_R
     );
   const scored = list
-    .filter(
-      (e) =>
-        typeof e.retestCount === 'number' &&
-        e.retestCount >= 2 &&
+    .filter((e) => {
+      const count =
+        typeof e.retestCount === 'number'
+          ? e.retestCount
+          : e.retestPeaks?.length ?? 0;
+      const p2 = peakBeforeNthRetest(e, 2);
+      return (
+        count >= 2 &&
         typeof e.resultR === 'number' &&
-        typeof e.maxAfterFirstRetest === 'number' &&
-        Number.isFinite(e.maxAfterFirstRetest) &&
-        (e.maxAfterFirstRetest as number) >= BE_RETEST_MIN_R
-    )
+        p2 != null &&
+        p2 >= BE_RETEST_MIN_R
+      );
+    })
     .map((e) => ({
       resultR: e.resultR as number,
-      peakR: e.maxAfterFirstRetest as number,
+      peakR: peakBeforeNthRetest(e, 2)!,
     }));
 
   const candidateLevels = BE_CANDIDATE_LEVELS.filter(
@@ -1058,6 +1078,7 @@ async function loadUnifiedEvents(userId: string, source: AnalyticsSource) {
     maximumRr: t.maximumRr,
     maxBeforeRetest: t.maxBeforeRetest,
     retestCount: t.retestCount,
+    retestPeaks: t.retestPeaks,
     maxAfterFirstRetest: t.maxAfterFirstRetest,
     resultR: t.resultR,
     outcome: outcomeFromR(t.resultR ?? 0),
@@ -1075,6 +1096,7 @@ async function loadUnifiedEvents(userId: string, source: AnalyticsSource) {
     maximumRr: e.maximumRr,
     maxBeforeRetest: e.maxBeforeRetest,
     retestCount: e.retestCount,
+    retestPeaks: e.retestPeaks,
     maxAfterFirstRetest: e.maxAfterFirstRetest,
     resultR: e.resultR,
     outcome:
