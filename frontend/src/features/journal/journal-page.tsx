@@ -691,10 +691,22 @@ function GalleryView({
             <p className="truncate text-[10px] text-white/80">
               Max {slide.entry.maximumRr != null ? `${slide.entry.maximumRr}R` : '—'}
               {' · '}
-              Retest{' '}
+              1st{' '}
               {slide.entry.maxBeforeRetest != null
                 ? `${slide.entry.maxBeforeRetest}R`
                 : '—'}
+              {slide.entry.retestCount != null && slide.entry.retestCount >= 2 ? (
+                <>
+                  {' · '}
+                  2nd{' '}
+                  {slide.entry.maxAfterFirstRetest != null
+                    ? `${slide.entry.maxAfterFirstRetest}R`
+                    : '—'}
+                </>
+              ) : null}
+              {slide.entry.retestCount != null ? (
+                <> · {slide.entry.retestCount} retest{slide.entry.retestCount === 1 ? '' : 's'}</>
+              ) : null}
             </p>
             <p className="text-[10px] text-white/70">
               {format(new Date(slide.entry.date), 'MMM d')} ·{' '}
@@ -766,10 +778,22 @@ function CarouselModal({
             <p className="text-xs text-white/60">
               Max {slide.entry.maximumRr != null ? `${slide.entry.maximumRr}R` : '—'}
               {' · '}
-              Before retest{' '}
+              1st retest peak{' '}
               {slide.entry.maxBeforeRetest != null
                 ? `${slide.entry.maxBeforeRetest}R`
                 : '—'}
+              {slide.entry.retestCount != null && slide.entry.retestCount >= 2 ? (
+                <>
+                  {' · '}
+                  2nd leg{' '}
+                  {slide.entry.maxAfterFirstRetest != null
+                    ? `${slide.entry.maxAfterFirstRetest}R`
+                    : '—'}
+                </>
+              ) : null}
+              {slide.entry.retestCount != null ? (
+                <> · {slide.entry.retestCount} retest(s)</>
+              ) : null}
               {' · '}
               {format(new Date(slide.entry.date), 'MMM d, HH:mm')} ·{' '}
               {index + 1}/{slides.length}

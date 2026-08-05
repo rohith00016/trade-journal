@@ -347,6 +347,48 @@ export function AnalyticsPage() {
         </CardContent>
       </Card>
 
+      {data.retestContinuation ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>After 1st retest</CardTitle>
+            <CardDescription>
+              {data.retestContinuation.afterFirstRetest.note} Log retest count + max before 2nd
+              retest for 2nd-leg BE below.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatMini
+              label="Sample"
+              value={String(data.retestContinuation.afterFirstRetest.sample)}
+            />
+            <StatMini
+              label="Ran past 1st peak"
+              value={fmt(data.retestContinuation.afterFirstRetest.continuedToHigherMaxPct, '%', 0)}
+            />
+            <StatMini
+              label="Avg extra R"
+              value={fmt(data.retestContinuation.afterFirstRetest.avgExtraR, 'R', 2)}
+            />
+            <StatMini
+              label="Win rate"
+              value={fmt(data.retestContinuation.afterFirstRetest.winRate, '%', 0)}
+            />
+          </CardContent>
+          {data.secondLegBe && data.retestContinuation.secondLegLogged > 0 ? (
+            <CardContent className="border-t border-border/60 pt-4">
+              <p className="text-sm font-medium">2nd leg BE (retestCount ≥ 2)</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {data.secondLegBe.hint ?? data.secondLegBe.note} · logged{' '}
+                {data.retestContinuation.secondLegLogged} · median 2nd peak{' '}
+                {data.retestContinuation.medianMaxAfterFirstRetest != null
+                  ? `${data.retestContinuation.medianMaxAfterFirstRetest}R`
+                  : '—'}
+              </p>
+            </CardContent>
+          ) : null}
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>1st vs 2nd vs 3rd setup</CardTitle>
@@ -478,6 +520,15 @@ function VerdictBadge({
     >
       {label}
     </span>
+  )
+}
+
+function StatMini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border/70 p-3">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-1 font-mono text-xl font-semibold">{value}</p>
+    </div>
   )
 }
 

@@ -57,7 +57,9 @@ Hit-rate / checklist reading (same as analytics):
 - pct at ≥XR = Max RR reached that level — use for TP fill likelihood.
 - beVerdict protect = move to BE after that run then retest; hold = do not BE early.
 - checklist: keep / cut / review / needs_data.
-- sequence: 2nd setup after first win/loss under the current source filter (combined includes skipped setups).`;
+- maxBeforeRetest = peak before 1st return to entry; retestCount = # of retests; maxAfterFirstRetest = peak before 2nd retest when retestCount ≥ 2.
+- retestContinuation.afterFirstRetest = stats after 1st retest (did price run further toward TP?).
+- secondLegBe = BE counterfactual on 2nd leg using maxAfterFirstRetest.`;
 
 function compactSlots(slots: BestTimeSlot[], limit = 12) {
   return slots
@@ -176,6 +178,8 @@ function buildPayload(insights: Awaited<ReturnType<typeof getUnifiedInsights>>) 
     bestSlot: insights.bestSlot,
     topSlots30mByAvgR: compactSlots(slots30),
     sequence: insights.sequence,
+    retestContinuation: insights.retestContinuation,
+    secondLegBe: insights.secondLegBe,
     checklistRuleAudit: {
       howToRead:
         'Audit EVERY checklist item. cut = remove required rule; keep = keep required; review = optional; needs_data = log more mixed answers.',

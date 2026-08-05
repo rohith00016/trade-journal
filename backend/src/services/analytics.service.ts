@@ -527,6 +527,9 @@ type UnifiedEvent = {
   maximumRr?: number;
   /** Max R before first retest of entry */
   maxBeforeRetest?: number;
+  retestCount?: number;
+  /** Peak before 2nd retest when retestCount ≥ 2 */
+  maxAfterFirstRetest?: number;
   resultR?: number;
   outcome?: 'win' | 'loss' | 'be' | 'unknown';
   checklist: ITrade['checklist'];
@@ -678,7 +681,7 @@ function suggestedBeFromRetests(
  * Trades without a logged maxBeforeRetest are unchanged (rule never assumed to fire).
  */
 function scoreBeLevel(
-  scored: Array<{ resultR: number; maxBeforeRetest: number }>,
+  scored: Array<{ resultR: number; peakR: number }>,
   levelR: number
 ): BeLevelScore {
   let triggered = 0;
@@ -691,7 +694,7 @@ function scoreBeLevel(
 
   for (const t of scored) {
     actualSum += t.resultR;
-    const fires = t.maxBeforeRetest >= levelR;
+    const fires = t.peakR >= levelR;
     if (!fires) {
       cfSum += t.resultR;
       continue;
@@ -738,7 +741,7 @@ function analyzeBeFromOutcomes(
     )
     .map((e) => ({
       resultR: e.resultR as number,
-      maxBeforeRetest: e.maxBeforeRetest as number,
+      peakR: e.maxBeforeRetest as number,
     }));
 
   const candidateLevels = BE_CANDIDATE_LEVELS.filter(
@@ -817,6 +820,145 @@ function analyzeBeFromOutcomes(
     beVerdict: null,
     beDeltaExpectancy: null,
     hint: null,
+  };
+}
+
+function hasMeaningfulFirstRetest(e: UnifiedEvent) {
+  if (typeof e.retestCount === 'number' && e.retestCount >= 1) return true;
+  return (
+    typeof e.maxBeforeRetest === 'number' &&
+    e.maxBeforeRetest >= BE_RETEST_MIN_R
+  );
+}
+
+function computeRetestContinuation(list: UnifiedEvent[]) {
+  const afterFirstRetest = list.filter(hasMeaningfulFirstRetest);
+  const withPeaks = afterFirstRetest.filter(
+    (e) =>
+      typeof e.maximumRr === 'number' &&
+      typeof e.maxBeforeRetest === 'number' &&
+      e.maxBeforeRetest >= BE_RETEST_MIN_R
+  );
+  const continued = withPeaks.filter(
+    (e) => (e.maximumRr as number) > (e.maxBeforeRetest as number)
+  );
+  const continuedPct =
+    withPeaks.length === 0
+      ? null
+      : Number(((continued.length / withPeaks.length) * 100).toFixed(1));
+  const extraRs = continued.map(
+    (e) => (e.maximumRr as number) - (e.maxBeforeRetest as number)
+  );
+
+  const secondLegSample = list.filter(
+    (e) =>
+      typeof e.retestCount === 'number' &&
+      e.retestCount >= 2 &&
+      typeof e.maxAfterFirstRetest === 'number' &&
+      e.maxAfterFirstRetest >= BE_RETEST_MIN_R
+  );
+  const secondPeaks = secondLegSample.map((e) => e.maxAfterFirstRetest as number);
+
+  return {
+    afterFirstRetest: {
+      sample: afterFirstRetest.length,
+      withPeaksSample: withPeaks.length,
+      continuedToHigherMaxPct: continuedPct,
+      avgExtraR: avg(extraRs),
+      winRate: winRateFromOutcomes(afterFirstRetest),
+      note:
+        'After 1st retest: % where Max RR exceeded maxBeforeRetest (trade ran further toward TP).',
+    },
+    secondLegLogged: secondLegSample.length,
+    medianMaxAfterFirstRetest: medianOrNull(secondPeaks),
+  };
+}
+
+function analyzeSecondLegBe(
+  list: UnifiedEvent[],
+  suggestedTpR: number | null
+): BeAnalysis {
+  const peaks = list
+    .map((e) => e.maxAfterFirstRetest)
+    .filter(
+      (n): n is number =>
+        typeof n === 'number' && Number.isFinite(n) && n >= BE_RETEST_MIN_R
+    );
+  const scored = list
+    .filter(
+      (e) =>
+        typeof e.retestCount === 'number' &&
+        e.retestCount >= 2 &&
+        typeof e.resultR === 'number' &&
+        typeof e.maxAfterFirstRetest === 'number' &&
+        Number.isFinite(e.maxAfterFirstRetest) &&
+        (e.maxAfterFirstRetest as number) >= BE_RETEST_MIN_R
+    )
+    .map((e) => ({
+      resultR: e.resultR as number,
+      peakR: e.maxAfterFirstRetest as number,
+    }));
+
+  const candidateLevels = BE_CANDIDATE_LEVELS.filter(
+    (r) => suggestedTpR == null || r < suggestedTpR
+  );
+  const levels = candidateLevels.map((levelR) => scoreBeLevel(scored, levelR));
+  const eligible = levels.filter(
+    (l) =>
+      l.triggered >= BE_OUTCOME_MIN_TRIGGERS &&
+      l.deltaExpectancy != null
+  );
+  const bestProtect = [...eligible]
+    .filter((l) => (l.deltaExpectancy as number) > 0)
+    .sort((a, b) => (b.deltaExpectancy as number) - (a.deltaExpectancy as number))[0];
+
+  if (bestProtect) {
+    return {
+      withRetestSample: peaks.length,
+      medianMaxBeforeRetest: medianOrNull(peaks),
+      scoredSample: scored.length,
+      levels,
+      suggestedBeR: bestProtect.levelR,
+      beSource: 'outcome',
+      beVerdict: 'protect',
+      beDeltaExpectancy: bestProtect.deltaExpectancy,
+      hint: `2nd leg: BE after +${bestProtect.levelR}R on 2nd push then retest — Δ ${bestProtect.deltaExpectancy}R/trade.`,
+    };
+  }
+
+  if (scored.length >= BE_OUTCOME_MIN_TRIGGERS && eligible.length > 0) {
+    const worstCost = [...eligible].sort(
+      (a, b) => (b.deltaExpectancy as number) - (a.deltaExpectancy as number)
+    )[0];
+    return {
+      withRetestSample: peaks.length,
+      medianMaxBeforeRetest: medianOrNull(peaks),
+      scoredSample: scored.length,
+      levels,
+      suggestedBeR: null,
+      beSource: 'outcome',
+      beVerdict: 'hold',
+      beDeltaExpectancy: worstCost?.deltaExpectancy ?? null,
+      hint:
+        worstCost != null
+          ? `2nd leg: hold for TP — BE after 2nd retest peak would cut winners (Δ ${worstCost.deltaExpectancy}R/trade at ${worstCost.levelR}R).`
+          : '2nd leg: hold for TP after second retest in this sample.',
+    };
+  }
+
+  return {
+    withRetestSample: peaks.length,
+    medianMaxBeforeRetest: medianOrNull(peaks),
+    scoredSample: scored.length,
+    levels,
+    suggestedBeR: null,
+    beSource: null,
+    beVerdict: null,
+    beDeltaExpectancy: null,
+    hint:
+      scored.length === 0
+        ? 'Log retestCount ≥ 2 and maxAfterFirstRetest for 2nd-leg BE analysis.'
+        : null,
   };
 }
 
@@ -915,6 +1057,8 @@ async function loadUnifiedEvents(userId: string, source: AnalyticsSource) {
     strategyName: t.strategyName || 'Unassigned',
     maximumRr: t.maximumRr,
     maxBeforeRetest: t.maxBeforeRetest,
+    retestCount: t.retestCount,
+    maxAfterFirstRetest: t.maxAfterFirstRetest,
     resultR: t.resultR,
     outcome: outcomeFromR(t.resultR ?? 0),
     checklist: t.checklist ?? [],
@@ -930,6 +1074,8 @@ async function loadUnifiedEvents(userId: string, source: AnalyticsSource) {
     strategyName: e.strategyName || 'Unassigned',
     maximumRr: e.maximumRr,
     maxBeforeRetest: e.maxBeforeRetest,
+    retestCount: e.retestCount,
+    maxAfterFirstRetest: e.maxAfterFirstRetest,
     resultR: e.resultR,
     outcome:
       typeof e.resultR === 'number'
@@ -1229,6 +1375,8 @@ export async function getUnifiedInsights(
     : null;
 
   const overallMetrics = metricsForEvents(events);
+  const retestContinuation = computeRetestContinuation(events);
+  const secondLegBe = analyzeSecondLegBe(events, overallMetrics.suggestedTpR);
 
   return {
     source,
@@ -1268,6 +1416,20 @@ export async function getUnifiedInsights(
       minPeakR: BE_RETEST_MIN_R,
       note:
         'BE counterfactual: if maxBeforeRetest ≥ level then flatten at 0R. Losses saved vs winners cut → protect if ΔR/trade > 0, else hold for TP.',
+    },
+    retestContinuation,
+    secondLegBe: {
+      sample: secondLegBe.withRetestSample,
+      scoredSample: secondLegBe.scoredSample,
+      medianMaxAfterFirstRetest: secondLegBe.medianMaxBeforeRetest,
+      levels: secondLegBe.levels,
+      suggestedBeR: secondLegBe.suggestedBeR,
+      beVerdict: secondLegBe.beVerdict,
+      beDeltaExpectancy: secondLegBe.beDeltaExpectancy,
+      minPeakR: BE_RETEST_MIN_R,
+      note:
+        '2nd leg: if maxAfterFirstRetest ≥ level (retestCount ≥ 2) then flatten at 0R on 2nd retest. Requires retestCount + maxAfterFirstRetest logged.',
+      hint: secondLegBe.hint,
     },
     bestTimes,
     bestSlot,

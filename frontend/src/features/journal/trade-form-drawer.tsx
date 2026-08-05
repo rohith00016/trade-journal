@@ -80,6 +80,8 @@ function buildTradeFormSchema(_source: JournalSource) {
     resultR: z.string().min(1, 'Result (R) is required — use 0 for BE'),
     maximumRr: z.string().optional(),
     maxBeforeRetest: z.string().optional(),
+    retestCount: z.string().optional(),
+    maxAfterFirstRetest: z.string().optional(),
     commission: z.string().optional(),
     session: z.enum(['asia', 'london', 'newyork', 'overlap', 'other']),
     notes: z.string().optional(),
@@ -103,6 +105,8 @@ const emptyDefaults: TradeFormValues = {
   resultR: '',
   maximumRr: '',
   maxBeforeRetest: '',
+  retestCount: '',
+  maxAfterFirstRetest: '',
   symbol: '',
   notes: '',
 }
@@ -150,6 +154,13 @@ function valuesFromTrade(trade: Trade | JournalEntry): TradeFormValues {
     maximumRr: numOrEmpty(trade.maximumRr),
     maxBeforeRetest: numOrEmpty(
       'maxBeforeRetest' in trade ? trade.maxBeforeRetest : undefined
+    ),
+    retestCount:
+      'retestCount' in trade && trade.retestCount != null
+        ? String(trade.retestCount)
+        : '',
+    maxAfterFirstRetest: numOrEmpty(
+      'maxAfterFirstRetest' in trade ? trade.maxAfterFirstRetest : undefined
     ),
     commission: trade.commission ? String(trade.commission) : '',
     session: trade.session || 'london',
@@ -291,6 +302,16 @@ export function TradeFormDrawer({
       const resultR = parseRequiredNumber(values.resultR, 'Result (R)')
       const maximumRr = parseOptionalNumber(values.maximumRr)
       const maxBeforeRetest = parseOptionalNumber(values.maxBeforeRetest)
+      const retestCountRaw = values.retestCount?.trim() ?? ''
+      const retestCount =
+        retestCountRaw === '' ? undefined : parseInt(retestCountRaw, 10)
+      if (
+        retestCountRaw !== '' &&
+        (!Number.isFinite(retestCount) || (retestCount as number) < 0)
+      ) {
+        throw new Error('Retest count must be 0 or higher')
+      }
+      const maxAfterFirstRetest = parseOptionalNumber(values.maxAfterFirstRetest)
 
       const body: Record<string, unknown> = {
         source,
@@ -305,6 +326,8 @@ export function TradeFormDrawer({
         resultR,
         maximumRr: maximumRr ?? undefined,
         maxBeforeRetest: maxBeforeRetest ?? undefined,
+        retestCount: retestCount ?? undefined,
+        maxAfterFirstRetest: maxAfterFirstRetest ?? undefined,
         date: new Date(values.date).toISOString(),
         strategyId: selectedStrategyId || undefined,
         checklist,
@@ -332,6 +355,9 @@ export function TradeFormDrawer({
   }
 
   const direction = form.watch('direction')
+  const retestCountWatch = form.watch('retestCount')
+  const showSecondLeg =
+    retestCountWatch !== '' && Number(retestCountWatch) >= 2
   const saving = createTrade.isPending || updateTrade.isPending
   const title = isEdit
     ? source === 'taken'
@@ -459,19 +485,53 @@ export function TradeFormDrawer({
                   />
                 </Field>
               </div>
-              <div className="mt-3">
-                <Field label="Max before retest">
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <Field label="Max before 1st retest">
                   <Input
                     type="number"
                     step="any"
-                    placeholder="e.g. 1.2 — blank if no retest"
+                    placeholder="e.g. 1 — blank if no retest"
                     {...form.register('maxBeforeRetest')}
                   />
                 </Field>
+                <Field label="Retest count">
+                  <Select
+                    value={retestCountWatch === '' ? '_unset' : retestCountWatch}
+                    onValueChange={(v) =>
+                      form.setValue('retestCount', v === '_unset' ? '' : v, {
+                        shouldDirty: true,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Not logged" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_unset">Not logged</SelectItem>
+                      <SelectItem value="0">0 — no retest</SelectItem>
+                      <SelectItem value="1">1</SelectItem>
+                      <SelectItem value="2">2</SelectItem>
+                      <SelectItem value="3">3+</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
               </div>
+              {showSecondLeg ? (
+                <div className="mt-3">
+                  <Field label="Max before 2nd retest (2nd push)">
+                    <Input
+                      type="number"
+                      step="any"
+                      placeholder="e.g. 1.2"
+                      {...form.register('maxAfterFirstRetest')}
+                    />
+                  </Field>
+                </div>
+              ) : null}
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Max RR = peak excursion. Max before retest = peak before price first returned to
-                entry — leave blank for noise scratches under ~0.5R. Used for BE suggestions.
+                Max RR = overall peak. Max before 1st retest = peak before price first returned to
+                entry. When retest count ≥ 2, log the peak on the second push before the second
+                retest (e.g. 1R → BE → 1.2R → BE → 2R TP: count=2, first=1, second=1.2, max=2).
               </p>
             </div>
 

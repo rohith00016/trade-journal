@@ -29,6 +29,8 @@ export type JournalEntryInput = {
   resultR?: number;
   maximumRr?: number;
   maxBeforeRetest?: number;
+  retestCount?: number;
+  maxAfterFirstRetest?: number;
   commission?: number;
   session?: 'asia' | 'london' | 'newyork' | 'overlap' | 'other';
   screenshots?: string[];
@@ -316,6 +318,8 @@ export async function createJournalEntry(userId: string, data: JournalEntryInput
     commission: data.commission ?? 0,
     maximumRr: data.maximumRr,
     maxBeforeRetest: data.maxBeforeRetest,
+    retestCount: data.retestCount,
+    maxAfterFirstRetest: data.maxAfterFirstRetest,
     symbol: data.symbol ? data.symbol.toUpperCase() : undefined,
     screenshots: data.screenshots ?? [],
     checklist: data.checklist ?? [],
@@ -349,6 +353,8 @@ export async function updateJournalEntry(
     resultR: data.resultR ?? existing.resultR,
     maximumRr: data.maximumRr ?? existing.maximumRr,
     maxBeforeRetest: data.maxBeforeRetest ?? existing.maxBeforeRetest,
+    retestCount: data.retestCount ?? existing.retestCount,
+    maxAfterFirstRetest: data.maxAfterFirstRetest ?? existing.maxAfterFirstRetest,
     commission: data.commission ?? existing.commission,
     session: data.session ?? existing.session,
     screenshots: data.screenshots ?? existing.screenshots,

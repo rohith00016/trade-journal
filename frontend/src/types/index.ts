@@ -128,6 +128,10 @@ export interface JournalEntry {
   maximumRr?: number
   /** Max R before first retest of entry; omit if no meaningful retest */
   maxBeforeRetest?: number
+  /** Times price returned to entry/BE */
+  retestCount?: number
+  /** Peak before 2nd retest when retestCount ≥ 2 */
+  maxAfterFirstRetest?: number
   commission?: number
   session?: TradeSession
   screenshots: string[]
@@ -326,6 +330,28 @@ export interface UnifiedInsights {
     avgResultR: number | null
   }>
   checklistImpact: ChecklistImpactRow[]
+  retestContinuation?: {
+    afterFirstRetest: {
+      sample: number
+      withPeaksSample: number
+      continuedToHigherMaxPct: number | null
+      avgExtraR: number | null
+      winRate: number | null
+      note: string
+    }
+    secondLegLogged: number
+    medianMaxAfterFirstRetest: number | null
+  }
+  secondLegBe?: {
+    sample: number
+    scoredSample: number
+    medianMaxAfterFirstRetest: number | null
+    suggestedBeR: number | null
+    beVerdict: 'protect' | 'hold' | null
+    beDeltaExpectancy: number | null
+    hint: string | null
+    note: string
+  }
 }
 
 export interface PlaybookResponse {
